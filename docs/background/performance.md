@@ -217,6 +217,21 @@ solves of the transit model with new parameters and dose amounts took 4.6 s in t
 JAX solver the number of doses and output times is rounded up to a power of two, so a run with
 9 doses after runs with 8 compiles once more ([Numerical choices](../guide/numerics.md#the-two-solvers)).
 
+### Many subjects
+
+`sim.function(scenario, wrt=...)` is built for the scenario's *shape*: how many doses go into
+each target, and how many output times there are. A new scenario of the same shape reuses the
+build; a new shape builds again, at the costs in the table above. In a population dataset,
+where subjects have different dosing histories and sampling times, that can dominate.
+
+The remedy is to give every subject the same shape: pad its regimen with doses of amount 0,
+and its output times with times whose outputs are not used. A dose of amount 0 or an extra
+output time changes nothing in the model, but it adds a point where the solver stops, so its
+steps change. The results therefore agree **to the solver's tolerance, not to round-off**: in
+the test of this page's claim (a two-dose oral model padded with two empty doses and two extra
+times), by about 0.1 x `rtol`, values and derivatives alike, on both solvers. Choose `rtol`
+with that in mind.
+
 ## Which solver when
 
 - **One run, or a few, of any size: scipy** (the default). It is the fastest single run above

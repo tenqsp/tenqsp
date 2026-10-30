@@ -58,7 +58,15 @@ from .ir import ModelIR  # noqa: E402
 from .lower import CompileError, MissingValues  # noqa: E402
 from .model import Condition, Model, Slice, cases, eq, ne  # noqa: E402
 from .notation import NotationError, load, table  # noqa: E402
-from .regimen import Bolus, Infusion, Regimen, bolus, infusion, regimen_from_table  # noqa: E402
+from .regimen import (  # noqa: E402
+    Bolus,
+    Infusion,
+    Regimen,
+    bolus,
+    infusion,
+    regimen_from_table,
+    regimens_from_table,
+)
 from .simulate import Scenario, SimResult, Simulator  # noqa: E402
 from .validate import ModelError, validate  # noqa: E402
 
@@ -80,6 +88,7 @@ __all__ = [
     "bolus",
     "infusion",
     "regimen_from_table",
+    "regimens_from_table",
     "abs",
     "acos",
     "asin",

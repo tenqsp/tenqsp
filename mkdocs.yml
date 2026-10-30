@@ -57,7 +57,7 @@ plugins:
   - search
   - mkdocs-jupyter:
       execute: false
-      include: ["tutorials/_build/*.ipynb"]
+      include: ["tutorials/*.ipynb"]
   - mkdocstrings:
       handlers:
         python:
@@ -74,6 +74,7 @@ nav:
       - Install: start/install.md
       - A first model: start/first-model.md
       - Why PDEs in QSP: start/why-pdes.md
+      - What TenQSP does not do yet: start/limitations.md
   - User guide:
       - guide/index.md
       - Axes, fields and compartments: guide/axes-fields.md
@@ -90,18 +91,18 @@ nav:
       - Troubleshooting: guide/troubleshooting.md
   - Tutorials:
       - tutorials/index.md
-      - 1 Transit compartments: tutorials/_build/01_transit_compartments.ipynb
-      - 2 Where in the gut: tutorials/_build/02_where_in_the_gut.ipynb
-      - 3 Myelosuppression: tutorials/_build/03_myelosuppression.ipynb
-      - 4 Lifespan response: tutorials/_build/04_lifespan_response.ipynb
-      - 5 Hepatic dispersion: tutorials/_build/05_hepatic_dispersion.ipynb
-      - 6 Whole-body PBPK: tutorials/_build/06_whole_body_pbpk.ipynb
-      - 7 Infection age: tutorials/_build/07_infection_age.ipynb
-      - 8 Age-structured population: tutorials/_build/08_age_structured_population.ipynb
-      - 9 Persisters and dormancy: tutorials/_build/09_persisters_and_dormancy.ipynb
-      - 10 Biofilm penetration: tutorials/_build/10_biofilm_penetration.ipynb
-      - 11 Phage plaque fronts: tutorials/_build/11_phage_plaque_fronts.ipynb
-      - 12 Drug tolerance continuum: tutorials/_build/12_drug_tolerance_continuum.ipynb
+      - 1 Transit compartments: tutorials/01_transit_compartments.ipynb
+      - 2 Where in the gut: tutorials/02_where_in_the_gut.ipynb
+      - 3 Myelosuppression: tutorials/03_myelosuppression.ipynb
+      - 4 Lifespan response: tutorials/04_lifespan_response.ipynb
+      - 5 Hepatic dispersion: tutorials/05_hepatic_dispersion.ipynb
+      - 6 Whole-body PBPK: tutorials/06_whole_body_pbpk.ipynb
+      - 7 Infection age: tutorials/07_infection_age.ipynb
+      - 8 Age-structured population: tutorials/08_age_structured_population.ipynb
+      - 9 Persisters and dormancy: tutorials/09_persisters_and_dormancy.ipynb
+      - 10 Biofilm penetration: tutorials/10_biofilm_penetration.ipynb
+      - 11 Phage plaque fronts: tutorials/11_phage_plaque_fronts.ipynb
+      - 12 Drug tolerance continuum: tutorials/12_drug_tolerance_continuum.ipynb
   - Reference:
       - Notation: reference/notation.md
       - Python API:

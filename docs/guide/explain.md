@@ -15,7 +15,7 @@ None of them changes the model.
 ## The example
 
 An infection-age model of bacteria and phage (as in
-[Tutorial 7](../tutorials/_build/07_infection_age.ipynb)): bacteria `B`,
+[Tutorial 7](../tutorials/07_infection_age.ipynb)): bacteria `B`,
 free phage `P`, and infected cells `I` spread over infection age `a`. Cells are infected at
 rate `k*B*P`, enter at age 0, and lyse with a hazard `h(a)` that rises near age `tau`,
 releasing `beta` phage each. An extinction group removes the bacteria if they fall below one

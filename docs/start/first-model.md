@@ -131,5 +131,5 @@ print(m.to_text())
 ## Where next
 
 - The [user guide](../guide/index.md) takes each part of a model in turn.
-- [Tutorial 1](../tutorials/_build/01_transit_compartments.ipynb) shows that this axis *is*
+- [Tutorial 1](../tutorials/01_transit_compartments.ipynb) shows that this axis *is*
   a chain of transit compartments, and what the number of compartments really controls.

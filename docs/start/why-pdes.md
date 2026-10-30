@@ -53,7 +53,7 @@ In the chain, the number of compartments sets the spread (the delay is gamma dis
 with coefficient of variation \(1/\sqrt{n}\)). So "how many transit compartments?" is
 really "how variable is the delay?", answered by changing the computation. With the PDE you
 state the spread you mean, as a diffusion along the axis or as a sharp delay, and refining
-the grid then only makes the answer more accurate. [Tutorial 1](../tutorials/_build/01_transit_compartments.ipynb)
+the grid then only makes the answer more accurate. [Tutorial 1](../tutorials/01_transit_compartments.ipynb)
 shows both.
 
 ## What the equations add

@@ -244,8 +244,8 @@ def regimen_from_table(table, *, targets: Mapping | None = None) -> Regimen:
         raise ValueError(f"A dose table needs the columns {sorted(need)}; it has {sorted(cols)}.")
     if "ID" in cols and len({str(v) for v in cols["ID"]}) > 1:
         raise ValueError(
-            "The dose table has several subjects (ID); give one subject's rows at a time "
-            "(one regimen per subject)."
+            "The dose table has several subjects (ID); read it with tq.regimens_from_table "
+            "(one regimen per subject), or give one subject's rows at a time."
         )
     nrow = len(cols["TIME"])
     out = Regimen()
@@ -300,6 +300,36 @@ def regimen_from_table(table, *, targets: Mapping | None = None) -> Regimen:
         else:
             out = out + bolus(target, amt, times=starts)
     return out
+
+
+def regimens_from_table(table, *, targets: Mapping | None = None) -> dict[object, Regimen]:
+    """One regimen per subject from NONMEM-style dose records with an ``ID`` column:
+    ``{ID: Regimen}``, in the order the subjects first appear. Each subject's rows are read
+    by ``regimen_from_table`` (same columns, same rules); a subject with no dose rows (only
+    observations) gets an empty regimen. A whole-number ID is given as an ``int``."""
+    cols = _columns(table)
+    if "ID" not in cols:
+        raise ValueError(
+            "regimens_from_table needs an ID column; for one subject use regimen_from_table."
+        )
+    rows: dict[object, list[int]] = {}
+    for i, v in enumerate(cols["ID"]):
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            raise ValueError(f"Row {i}: the ID is missing.")
+        rows.setdefault(_subject(v), []).append(i)
+    return {
+        sid: regimen_from_table({k: [v[i] for i in idx] for k, v in cols.items()}, targets=targets)
+        for sid, idx in rows.items()
+    }
+
+
+def _subject(v):
+    """An ID as a dictionary key: 3, 3.0 and numpy's 3 are the same subject (``3``)."""
+    if isinstance(v, (bool, np.bool_)):
+        return v
+    if isinstance(v, (int, float, np.integer, np.floating)) and float(v).is_integer():
+        return int(v)
+    return v.item() if isinstance(v, np.generic) else v
 
 
 # ----------------------------------------------------------------------------- helpers

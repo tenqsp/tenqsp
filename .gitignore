@@ -20,7 +20,7 @@ handtests/*.png
 handtests/*.json
 
 # executed tutorial notebooks (python docs/tutorials/build.py)
-docs/tutorials/_build/
+docs/tutorials/*.ipynb
 
 # documentation site (mkdocs build)
 site/
