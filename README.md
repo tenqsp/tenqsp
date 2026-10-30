@@ -1,7 +1,9 @@
 # TenQSP
 
 [![CI](https://github.com/tenqsp/tenqsp/actions/workflows/ci.yml/badge.svg)](https://github.com/tenqsp/tenqsp/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/tenqsp.svg)](https://pypi.org/project/tenqsp/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23804658.svg)](https://doi.org/10.5281/zenodo.23804658)
 
 **Structured-population PDEs for quantitative systems pharmacology, in JAX.**
 
@@ -64,8 +66,10 @@ the notation and Python references.
 
 ## Cite
 
-If you use TenQSP in your work, please cite it: see [`CITATION.cff`](CITATION.cff), or
-"Cite this repository" on GitHub.
+If you use TenQSP in your work, please cite it. Each release is archived on Zenodo:
+[doi:10.5281/zenodo.23804658](https://doi.org/10.5281/zenodo.23804658) cites TenQSP in
+general, and the Zenodo page gives a DOI for each version. See also
+[`CITATION.cff`](CITATION.cff), or "Cite this repository" on GitHub.
 
 ## Licence and credit
 
