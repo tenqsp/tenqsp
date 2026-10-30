@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The project follows semantic
 versioning; `0.x` releases may change the API.
 
+## [Unreleased]
+
+### Fixed
+- `sim.function`: with a dose after the start time, the value could be NaN (with status
+  "ok") when the right-hand side is not defined below zero, such as a Hill term `C^h` with
+  a non-integer `h`.
+- `sim.function`: in a model with an extinction group, the gradient (`jax.grad`) could be
+  NaN while the value and forward-mode derivatives were right, under the same condition.
+
 ## [0.6.0] — first public release
 
 TenQSP's first public release. What it offers:

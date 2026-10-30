@@ -340,6 +340,14 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
             y_tau = dense(Dn, t_new, h_abs, order_next, tau)
             if G or E:
                 ev = segs["ev"][k]
+                # Only the last step of a segment that ends at an event uses what follows. On
+                # every other step tau lies beyond the step, and y_tau extrapolates its
+                # polynomial there (a concentration can come out negative, and C^1.5 is then
+                # NaN): discarded by ``where`` below, but a NaN there still makes the
+                # reverse-mode derivative NaN (0 x NaN). Those steps read their own end.
+                use = at_event & last
+                tau = jnp.where(use, tau, t_new)
+                y_tau = jnp.where(use, y_tau, Dn[0])
                 y_sg = jax.lax.stop_gradient(y_tau)
                 grad_g = jax.grad(lambda yy: event_value(ev, tau, yy, th))(y_sg)
                 g_start = event_value(ev, t, D[0], th)
@@ -386,8 +394,10 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
             at = t == t0
             return jnp.where(at, t, t0) - jax.lax.stop_gradient(jnp.where(at, t, t0))
 
-        def without(k):
-            return cm._rhs_impl(t0, z0.at[b_index[k]].add(-rise[k]), th0, geom)
+        def without(k):  # only a dose at t0 is taken back (a later one would leave a negative
+            # state, where C^1.5 is NaN, and 0 x NaN is NaN even in the value)
+            back = jnp.where(b_time[k] == t0, rise[k], 0.0)
+            return cm._rhs_impl(t0, z0.at[b_index[k]].add(-back), th0, geom)
 
         f_after = cm._rhs_impl(t0, z0, th0, geom)
         f_before = jax.vmap(without)(jnp.arange(b_time.shape[0]))  # each dose not yet given
