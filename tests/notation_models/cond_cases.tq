@@ -1,0 +1,14 @@
+# Conditionals, the cases brace of a paper
+model cond
+param MIC=2, k1=0.5, k2=0.2, k3=0.05, Emax=1
+
+k = k1   if C > MIC
+    k2   if C > MIC/2
+    k3   otherwise
+E = Emax     if C > MIC
+    Emax/2   if C > MIC/2
+    0        otherwise
+
+d_t(C) = -k*C
+d_t(A) = E
+C(0) = 10

@@ -1,0 +1,24 @@
+# Pinned versions used in CI and the dev environment.
+# Bump deliberately, together with a full test run.
+jax==0.11.2
+jaxlib==0.11.2
+diffrax==0.7.2
+lineax==0.1.1
+equinox==0.13.8
+optimistix==0.1.0
+numpy==2.5.3
+scipy==1.18.1
+sympy==1.14.0
+xarray==2026.9.0
+matplotlib==3.11.2
+pytest==9.1.1
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+execnet==2.1.2
+hypothesis==6.168.5
+ruff==0.16.10
+jupytext==1.19.6
+nbclient==0.11.0
+nbformat==5.11.1
+ipykernel==7.4.0
+threadpoolctl==3.7.0

@@ -1,0 +1,9 @@
+# V26: axial dispersion with Danckwerts ends, a bolus near the inlet
+model dispersion
+axis Z in [0, 1] n=10 kind=spatial
+param DN=0.17, RN=2, Cin=1
+field C(Z)
+d_t(C) = -d_Z(C) + d_Z(DN*d_Z(C)) - RN*C    using sharp
+inflow  C at Z=lower: Cin
+outflow C at Z=upper
+C(0) = 1*normal(Z, mean=0.1, sd=0.03)

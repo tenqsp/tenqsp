@@ -1,0 +1,7 @@
+# Curved negative velocity: enters at the upper end, leaves at the lower
+model down
+axis x in [0, 1] n=6
+field u(x)
+d_t(u) = -d_x(-(1 + x^2)*u)
+inflow  u at x=upper: 2
+outflow u at x=lower

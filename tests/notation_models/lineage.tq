@@ -1,0 +1,10 @@
+# V17: a lineage of infected cells and free phage, one extinction group
+model lineage
+axis age in [0, 1] n=20 kind=one_way
+field I(age)
+d_t(I) = -d_age(I) - 0.3*I
+inflow  I at age=lower: 0.2*P
+outflow I at age=upper to P
+d_t(P) = -0.2*P - 0.1*P
+P(0) = 50
+extinction phage: I, P below 0.5

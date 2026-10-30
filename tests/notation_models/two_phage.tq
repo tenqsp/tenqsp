@@ -1,0 +1,24 @@
+model two_phage
+axis r1 categorical [S, R]
+axis r2 categorical [S, R]
+param g=1, K=1e9, beta=50, dp=0.1, mu=1e-6, mux=1e-8
+param k1[r1] = {S: 1e-9, R: 0}
+param k2[r2] = {S: 2e-9, R: 0}
+
+field B(r1, r2)
+
+N   = sum_r1(sum_r2(B))
+div = g*B*(1 - N/K)
+
+transitions M1 on r1: S -> R = mu
+transitions M2 on r2: S -> R = mu
+transitions X on (r1, r2): (S, S) -> (R, R) = mux
+
+d_t(B)  = div - k1[r1]*P1*B - k2[r2]*P2*B
+          + trans_r1(M1, div) + trans_r2(M2, div) + trans_{r1,r2}(X, div)
+d_t(P1) = (beta - 1)*sum_r1(sum_r2(k1[r1]*B))*P1 - dp*P1
+d_t(P2) = (beta - 1)*sum_r1(sum_r2(k2[r2]*B))*P2 - dp*P2
+
+B[r1=S, r2=S](0) = 1e6
+P1(0) = 1e4
+P2(0) = 1e4

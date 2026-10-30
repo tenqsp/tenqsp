@@ -1,0 +1,13 @@
+# Equations, transitions, totals and outputs on slices of a weighted field
+model slab
+axis organ categorical [gut, liver]
+axis sub categorical [v, c]
+param V[organ, sub] = {gut: {v: 1, c: 3}, liver: {v: 2, c: 5}}
+field C(organ, sub) weights=V[organ, sub]
+transitions G on organ: gut -> liver = 4
+d_t(C[sub=v]) = 2 + trans_organ(G, C)
+d_t(C[organ=liver, sub=c]) = -0.5*C
+C(0) = 1
+observable vasc = sum_organ(C[sub=v])
+observable liver_c = C[organ=liver, sub=c]
+observable amount = sum_organ(sum_sub(C))

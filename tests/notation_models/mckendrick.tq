@@ -1,0 +1,12 @@
+# Gallery Model 1 with constant births b and deaths mu; the field is called n
+model mckendrick
+axis a in [0, 10] n=50 kind=one_way
+param b=0.8, mu=0.5
+field n(a)
+
+d_t(n) = -d_a(n) - mu*n
+inflow  n at a=lower: int_a(b*n)
+outflow n at a=upper
+
+n(0) = exp(-((a - 1)/0.25)^2)
+observable N = int_a(n)

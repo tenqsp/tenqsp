@@ -1,0 +1,8 @@
+# Gallery Model 6: reacting slab exchanging with the bulk liquid (amount M, volume 2)
+model biofilm
+axis z in [0, 1] n=10 kind=spatial
+field C(z)
+compartment M
+d_t(C) = d_z(0.1*d_z(C)) - 0.4*C
+robin C at z=upper: 0.5*(M/2 - C) with M
+d_t(M) = 1 - 0.3*M/2

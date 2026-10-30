@@ -1,0 +1,49 @@
+# Whole-body PBPK (pbpk_models.pbpk), concentrations weighted by volumes
+model pbpk
+axis organ categorical [lung, brain, heart, muscle, adipose, kidney, gut, spleen, liver]
+axis sub categorical [vascular, interstitial, cellular]
+
+param V[organ, sub] = {
+    lung:    {vascular: 0.06,   interstitial: 0.18,   cellular: 0.96},
+    brain:   {vascular: 0.07,   interstitial: 0.21,   cellular: 1.12},
+    heart:   {vascular: 0.0165, interstitial: 0.0495, cellular: 0.264},
+    muscle:  {vascular: 1.45,   interstitial: 4.35,   cellular: 23.2},
+    adipose: {vascular: 0.75,   interstitial: 2.25,   cellular: 12},
+    kidney:  {vascular: 0.0155, interstitial: 0.0465, cellular: 0.248},
+    gut:     {vascular: 0.06,   interstitial: 0.18,   cellular: 0.96},
+    spleen:  {cellular: 0.152,  vascular: 0.0095,     interstitial: 0.0285},
+    liver:   {vascular: 0.09,   interstitial: 0.27,   cellular: 1.44},
+}
+param Kp[organ] = {lung: 1, brain: 0.5, heart: 2, muscle: 1.5, adipose: 5, kidney: 2,
+                   gut: 2, spleen: 1.5, liver: 3}
+param Q_art[organ] = {lung: 0, brain: 45, heart: 15, muscle: 60, adipose: 15, kidney: 70,
+                      gut: 65, spleen: 10, liver: 20}
+param Q_ven[organ] = {lung: 0, brain: 45, heart: 15, muscle: 60, adipose: 15, kidney: 70,
+                      gut: 0, spleen: 0, liver: 95}
+param PS1=50, PS2=10, CLint=30, Kp_liver=3, Q_CO=300, R=0, V_art=1.7, V_ven=3.4
+param Q_gut=65, Q_spleen=10
+
+field C(organ, sub) weights=V[organ, sub]
+compartment Cart volume=V_art
+compartment Cven volume=V_ven
+
+transitions X on sub:
+    vascular -> interstitial = PS1
+    interstitial -> vascular = PS1
+    interstitial -> cellular = PS2
+    cellular -> interstitial = PS2/Kp[organ]
+transitions portal on organ: gut -> liver = Q_gut, spleen -> liver = Q_spleen
+
+flux arterial: Cart -> C[sub=vascular] = Q_art[organ]*Cart
+flux venous:   C[sub=vascular] -> Cven = Q_ven[organ]*C
+flux to_lung:  Cven -> C[organ=lung, sub=vascular] = Q_CO*Cven
+flux from_lung: C[organ=lung, sub=vascular] -> Cart = Q_CO*C
+
+d_t(C)               = trans_sub(X, C)
+d_t(C[sub=vascular]) = trans_organ(portal, C) + arterial/V[organ, sub] - venous/V[organ, sub]
+d_t(C[organ=lung, sub=vascular])  = to_lung/V[organ, sub] - from_lung/V[organ, sub]
+d_t(C[organ=liver, sub=cellular]) = -CLint/Kp_liver*C/V[organ, sub]
+
+d_t(Cart) = from_lung/V_art - sum_organ(arterial)/V_art
+d_t(Cven) = sum_organ(venous)/V_ven - to_lung/V_ven + R/V_ven
+d_t(AUC)  = Cart

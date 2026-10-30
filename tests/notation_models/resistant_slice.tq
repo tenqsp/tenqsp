@@ -1,0 +1,15 @@
+# Strains under a washing-out drug; the resistant slice is its own floored group
+model strains
+axis s categorical [S, R]
+param g[s] = {S: 1, R: 0.8}
+param susc[s] = {S: 1, R: 0}
+field B(s)
+
+transitions M on s: S -> R = 1e-6
+div = g[s]*B
+d_t(B) = div - 3*susc[s]*C/(0.05 + C)*B + trans_s(M, div)
+d_t(C) = -0.3*C
+
+C(0) = 1
+B[s=S](0) = 1e3
+extinction B[s=R] below 1 with noise_floor

@@ -1,0 +1,8 @@
+# One compartment eliminated at a constant rate, dosed twice (test_ledger.decay)
+model decay
+
+param delta=0.3
+
+d_t(P) = -delta*P
+
+dose P at t=0, 5: 5e8, 1e8

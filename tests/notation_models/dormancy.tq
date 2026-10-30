@@ -1,0 +1,9 @@
+# V29: dormancy depth with drift, depth-dependent diffusion, growth and kill
+model dormancy
+axis xi in [0, 1] n=10
+param g=1, d=0.1, E=0.5, K=10
+field B(xi)
+N = int_xi(B)
+d_t(B) = -d_xi((-2*(xi - 0.3) - 0.05)*B) + d_xi(0.05*(1 + xi)*d_xi(B))
+         + (g*(1 - xi)*(1 - N/K) - d - E*(1 - xi)^2)*B      using sharp
+B(0) = 1*normal(xi, mean=0.8, sd=0.05)

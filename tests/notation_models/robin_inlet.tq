@@ -1,0 +1,9 @@
+# Flow entering through a Robin end, credited to the reservoir W
+model robin_adv
+axis z in [0, 1] n=8 kind=spatial
+field C(z)
+compartment W
+d_t(C) = -d_z(C) + d_z(0.2*d_z(C)) - 1.5*C      using sharp
+robin C at z=lower: 2*(3 - C) with W
+outflow C at z=upper
+d_t(W) = 0

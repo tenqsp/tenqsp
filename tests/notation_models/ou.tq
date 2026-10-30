@@ -1,0 +1,6 @@
+# V5: Ornstein-Uhlenbeck, velocity changing sign at 0
+model ou
+axis x in [-4, 4] n=20 kind=bidirectional
+field u(x)
+d_t(u) = -d_x(-x*u) + d_x(0.5*d_x(u))   using sharp
+u(0) = 1*normal(x, mean=1.5, sd=0.3)

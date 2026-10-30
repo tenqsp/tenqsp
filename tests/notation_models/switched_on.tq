@@ -1,0 +1,4 @@
+# A time switch inside a compartment rate
+model on
+param t_on=5, kin=1
+d_t(A) = (kin if t > t_on else 0) - 0.1*A

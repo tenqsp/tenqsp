@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tenqsp"
+dynamic = ["version"]
+description = "Structured-population PDEs for quantitative systems pharmacology, in JAX"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Dongwoo Chae" }]
+keywords = [
+    "pharmacometrics", "quantitative systems pharmacology", "structured populations",
+    "partial differential equations", "finite volume", "JAX",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = [
+    "jax>=0.4.30",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sympy>=1.12",
+    "diffrax>=0.6",
+    "lineax>=0.0.7",
+    "equinox>=0.11",
+    "threadpoolctl>=3.1",
+]
+
+[project.urls]
+Repository = "https://github.com/tenqsp/tenqsp"
+
+[project.optional-dependencies]
+xarray = ["xarray>=2024.1"]
+plot = ["matplotlib>=3.8"]
+docs = [
+    "matplotlib>=3.8", "jupytext>=1.16", "nbclient>=0.10", "ipykernel>=6.29",
+    "mkdocs>=1.6", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26", "mkdocs-jupyter>=0.25",
+]
+dev = ["pytest>=8", "pytest-timeout>=2.3", "pytest-xdist>=3.6", "hypothesis>=6.100", "ruff>=0.6"]
+
+[tool.hatch.version]
+path = "src/tenqsp/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tenqsp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests run in parallel (pytest-xdist): one worker per core, at most 8; -n0 runs serially
+# -p no:jaxtyping: that plugin imports numpy before conftest.py can give each worker one BLAS
+# thread (tests/conftest.py); with it every worker ran 65 threads and big solves slowed 10x
+addopts = "-ra --strict-markers -m 'not slow and not bench' -n auto --maxprocesses 8 -p no:jaxtyping"
+timeout = 120
+# scipy's BDF subtracts a not-yet-written row of its np.empty difference table on the first
+# step (overwritten before use; see scipy_backend._segment); tests that call solve_ivp
+# directly can see the warning when that memory happens to hold a NaN pattern
+filterwarnings = [
+    "ignore:invalid value encountered in subtract:RuntimeWarning:scipy.integrate._ivp.bdf",
+]
+markers = [
+    "slow: convergence studies and long runs (run in CI with -m slow)",
+    "bench: performance benchmarks (manual / nightly, -m bench)",
+    "scipy_backend: about the scipy backend itself (Radau retries, its compile counters); skipped by pytest --backend=jax",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["spikes"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]
+ignore = ["E741"]  # I (infected cells) is a standard model name

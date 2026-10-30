@@ -1,0 +1,7 @@
+# Phage at the site fed from blood; both in one floored group
+model pk_lineage
+flux supply: Pc -> P = 0.3*Pc
+d_t(Pc) = -supply
+d_t(P)  = supply - P
+Pc(0) = 10
+extinction P, Pc below 1 with noise_floor

@@ -1,0 +1,9 @@
+# Two weighted spaces exchanging at a clearance k
+model spaces
+axis s categorical [one, two]
+param V[s] = {one: 1, two: 4}
+param k=2
+field C(s) weights=V[s]
+transitions X on s: one -> two = k, two -> one = k
+d_t(C) = trans_s(X, C)
+C[s=one](0) = 1

@@ -1,0 +1,12 @@
+# Classes moving up and down x; the lower end feeds W, the upper end absorbs
+model two_way
+axis s categorical [up, down]
+axis x in [0, 1] n=6
+param c[s] = {up: 1, down: -2}
+field B(s, x)
+compartment W
+d_t(B) = -d_x(c[s]*B)     using sharp
+outflow B at x=lower to W
+outflow B at x=upper
+d_t(W) = -0.1*W
+B(0) = density(normal(x, mean=0.5, sd=0.2))

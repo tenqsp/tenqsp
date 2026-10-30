@@ -1,0 +1,24 @@
+model phage_latency
+
+axis age in [0, 2] n=40 units=h kind=one_way
+
+param k=1e-9, beta=50, g=1, Bmax=1e9, delta=0.1, h_max=5, tau=0.8, s=0.05
+
+compartment B
+compartment P
+field I(age)
+
+hz(age) = h_max*sigmoid((age - tau)/s)
+
+d_t(B) = g*B*(1 - B/Bmax) - k*B*P
+d_t(I) = -d_age(I) - hz*I          using sharp
+inflow  I at age=lower: k*B*P
+outflow I at age=upper
+d_t(P) = beta*int_age(hz(age)*I) - k*B*P - delta*P
+
+B(0) = 1e6
+P(0) = 1e7
+I(0) = 0
+
+dose P at t=0: 1e8
+observable burst_rate = int_age(hz*I)

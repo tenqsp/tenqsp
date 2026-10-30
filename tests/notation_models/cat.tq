@@ -1,0 +1,15 @@
+# Compartmental absorption and transit: 7 erlang cells of the small intestine
+model cat
+axis z in [0, 1] n=7 kind=one_way
+param tsi=3.316666666666667, ka=0.6
+
+field M(z) units=mg
+compartment absorbed units=mg
+compartment colon units=mg
+
+d_t(M) = -d_z(M/tsi) - ka*M
+inflow  M at z=lower: 0
+outflow M at z=upper to colon
+d_t(absorbed) = ka*int_z(M)
+
+M(0) = 100*point(z, at=0.5/7)

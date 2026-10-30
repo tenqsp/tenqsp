@@ -1,0 +1,9 @@
+# Per-axis switching on r1 plus a joint switch (S,S) <-> (R,R)
+model joint
+axis r1 categorical [S, R]
+axis r2 categorical [S, R]
+field B(r1, r2)
+transitions M1 on r1: S -> R = 0.2
+transitions J on (r1, r2): (S, S) -> (R, R) = 0.05, (R, R) -> (S, S) = 0.01
+d_t(B) = trans_r1(M1, B) + trans_{r1, r2}(J, B)
+B[r1=S, r2=S](0) = 1

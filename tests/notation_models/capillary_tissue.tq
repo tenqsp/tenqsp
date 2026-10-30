@@ -1,0 +1,16 @@
+# Sangren-Sheppard capillary-tissue exchange with a Gaussian input pulse
+model capillary_tissue
+axis x in [0, 1] n=20 kind=one_way
+param L=1, v=1, V=1, Vt=2, PS=5, t0=1, sg=0.1
+
+field C(x)
+field Ct(x)
+
+d_t(C)  = -d_x(v*C) - (PS/V)*(C - Ct)      using sharp
+inflow  C at x=lower: (L/V)*exp(-(t - t0)^2/(2*sg^2))/(sg*2.5066282746310002)
+outflow C at x=upper
+d_t(Ct) = (PS/Vt)*(C - Ct)
+
+inside = int_x((V*C + Vt*Ct)/L)
+d_t(W1) = inside
+d_t(W2) = 2*t*inside

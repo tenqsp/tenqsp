@@ -1,0 +1,8 @@
+# Explicit cell faces; one class is its own extinction group
+model sliced_decay
+axis c categorical [a, b]
+axis x faces=[0, 0.1, 0.5, 0.6, 1.4, 2.0]
+field B(x, c)
+d_t(B) = -0.5*B
+B(0) = 10
+extinction B[c=a] below 1

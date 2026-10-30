@@ -1,0 +1,8 @@
+# V42: Fisher travelling wave, both ends held at the exact solution
+model fisher
+axis x in [-10, 30] n=20 kind=spatial
+field u(x)
+d_t(u) = d_x(1*d_x(u)) + u*(1 - u)
+dirichlet u at x=lower: (1 + exp((-10 - 5/sqrt(6)*t)/sqrt(6)))^(-2)
+dirichlet u at x=upper: (1 + exp((30 - 5/sqrt(6)*t)/sqrt(6)))^(-2)
+u(0) = (1 + exp(x/sqrt(6)))^(-2)

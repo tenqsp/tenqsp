@@ -1,0 +1,18 @@
+# V13 with a Monod nutrient: mutation on the division flux
+model mutation
+axis s categorical [S, R]
+param g[s] = {S: 1, R: 0.5}
+param mu = 1e-6
+param Ks=1, Y=1e-9
+field B(s)
+compartment N
+
+div = g[s]*N/(Ks + N)*B
+transitions M on s: S -> R = mu
+
+d_t(B) = div + trans_s(M, div)
+d_t(N) = -Y*sum_s(div)
+
+N(0) = 10
+B[s=S](0) = 1e8
+B[s=R](0) = 10

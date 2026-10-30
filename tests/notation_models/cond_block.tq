@@ -1,0 +1,17 @@
+# Conditionals, a block as ported from NONMEM/Monolix
+model cond
+param MIC=2, k1=0.5, k2=0.2, k3=0.05, Emax=1
+
+if C > MIC:
+    k = k1
+    E = Emax
+elif C > MIC/2:
+    k = k2
+    E = Emax/2
+else:
+    k = k3
+    E = 0
+
+d_t(C) = -k*C
+d_t(A) = E
+C(0) = 10

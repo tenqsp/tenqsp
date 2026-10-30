@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use TenQSP in your work, please cite it as below."
+title: "TenQSP: structured-population PDEs for quantitative systems pharmacology, in JAX"
+type: software
+authors:
+  - family-names: Chae
+    given-names: Dongwoo
+    affiliation: "Yonsei University College of Medicine, Seoul, Korea"
+    orcid: "https://orcid.org/0000-0002-7675-3821"
+repository-code: "https://github.com/tenqsp/tenqsp"
+license: Apache-2.0
+keywords:
+  - pharmacometrics
+  - quantitative systems pharmacology
+  - structured populations
+  - partial differential equations
+  - JAX

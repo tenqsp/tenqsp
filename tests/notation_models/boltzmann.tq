@@ -1,0 +1,8 @@
+# Chemotaxis up a fixed attractant S (S has no equation)
+model boltzmann
+axis x in [0, 1] n=10 kind=spatial
+field S(x)
+field B(x)
+d_t(B) = -d_x(0.8*grad_x(S)*B) + d_x(0.1*d_x(B))   using sharp
+S(0) = exp(-((x - 0.6)/0.2)^2) + 0.5*x
+B(0) = 1

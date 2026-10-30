@@ -1,0 +1,41 @@
+model three_axis_toy
+axis a in [0, 1.5] n=24 units=h kind=one_way
+axis z in [0, 1] n=16 kind=bidirectional
+axis s categorical [S, R]
+
+param g_max=1, K=1e9, beta=50, delta=0.1, h_max=5, tau=0.8, s_h=0.05, w_amp=0.5
+param Dz=0.01, mu=1e-6
+param k[s]   = {S: 1e-9, R: 1e-11}
+param cost[s] = {R: 0.1, S: 0}
+param lag[s] = {S: 1, R: 1.3}
+
+field B(z, s) units=cells
+field I(a, z, s) units=cells
+compartment P units=PFU
+compartment L units=cells
+
+B_tot = int_z(sum_s(B))
+I_tot = int_a(int_z(sum_s(I)))
+div = g_max*(1 - z)*(1 - cost[s])*B*(1 - (B_tot + I_tot)/K)
+ads = k[s]*(1 - 0.5*z)*B*P
+h(a, s) = h_max*sigmoid((a - tau*lag[s])/s_h)
+lysis = int_a(int_z(sum_s(h*I)))
+
+transitions M on s: S -> R = mu, R -> S = mu
+
+d_t(B) = div - ads
+         + trans_s(M, div)
+         - d_z(w_amp*(0.3 - z)*B) + d_z(Dz*d_z(B))
+d_t(I) = -d_a(I) - h*I + d_z(Dz*d_z(I))     using sharp on a
+inflow  I at a=lower: ads
+outflow I at a=upper to L
+d_t(P) = beta*lysis - int_z(sum_s(ads)) - delta*P
+d_t(L) = lysis
+
+B[s=S](0) = 1e7*normal(z, mean=0.1, sd=0.08)
+B[s=R](0) = 1e4*normal(z, mean=0.1, sd=0.08)
+
+dose P at t=0: 1e9
+observable bacteria = B_tot
+observable infected = I_tot
+observable phage = P

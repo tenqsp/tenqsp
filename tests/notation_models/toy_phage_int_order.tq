@@ -1,0 +1,34 @@
+# toy_phage.tq with the nested totals written in the other order
+model phage_toy
+axis z in [0, 1] n=30
+axis s categorical [S, R]
+axis a in [0, 1.5] n=40 units=h kind=one_way
+
+param g_max=1, K=1e9, beta=50, delta=0.1, h_max=5, tau=0.8, s_h=0.05, w_amp=0.5,
+      Dz=0.01, mu=1e-6
+param k[s] = {S: 1e-9, R: 1e-12}
+param cost[s] = {S: 0, R: 0.1}
+
+field B(z, s)
+field I(a, z)
+compartment P
+
+B_tot = sum_s(int_z(B))         # the same total, summed in the other order
+div   = g_max*(1 - z)*(1 - cost[s])*B*(1 - B_tot/K)
+ads   = k[s]*(1 - 0.5*z)*B*P
+h(a)  = h_max*sigmoid((a - tau)/s_h)
+
+transitions M on s: S -> R = mu, R -> S = mu
+
+d_t(B) = div - ads + trans_s(M, div) - d_z(w_amp*(0.3 - z)*B) + d_z(Dz*d_z(B))
+d_t(I) = -d_a(I) - h*I + d_z(Dz*d_z(I))     using sharp on a
+inflow  I at a=lower: sum_s(ads)
+outflow I at a=upper
+d_t(P) = beta*int_z(int_a(h*I)) - int_z(sum_s(ads)) - delta*P
+
+B[s=S](0) = 1e7*normal(z, mean=0.1, sd=0.08)
+B[s=R](0) = 0
+
+dose P at t=0: 1e9
+observable bacteria = B_tot
+observable phage = P

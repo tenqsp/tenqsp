@@ -1,0 +1,12 @@
+# Each class follows S at its own speed, slowed by crowding
+model chemotaxis_by_class
+axis s categorical [fast, slow]
+axis x in [0, 1] n=7 kind=spatial
+param chi[s] = {fast: 1, slow: 0.2}
+field S(x)
+field B(s, x)
+B_x = sum_s(B)
+d_t(B) = -d_x(chi[s]*grad_x(S)/(1 + B_x)*B) + d_x(0.05*d_x(B))     using sharp
+d_t(S) = d_x(0.2*d_x(S)) + B_x - S
+S(0) = 1
+B(0) = 1

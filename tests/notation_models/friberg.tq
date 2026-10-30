@@ -1,0 +1,18 @@
+model friberg
+axis z in [0, 1] n=3 kind=one_way
+param mtt=100, gamma=0.17, circ0=5, slope=0.5, ke=0.1
+ktr = 4/mtt
+
+field Transit(z)
+
+d_t(Transit) = -d_z(ktr/3*Transit)
+inflow  Transit at z=lower: ktr*Prol
+outflow Transit at z=upper to Circ
+d_t(Prol) = ktr*Prol*(1 - slope*Conc)*(circ0/Circ)^gamma - ktr*Prol
+d_t(Circ) = -ktr*Circ
+d_t(Conc) = -ke*Conc
+
+Prol(0)    = 5
+Circ(0)    = 5
+Transit(0) = 15
+dose Conc at t=0: 10

@@ -1,0 +1,16 @@
+# Depot -> erlang age axis -> central; dose amounts are formulas of a parameter
+model transit
+
+axis a in [0, 2] n=5 kind=one_way
+param ka=1.5, ke=0.2, D=100
+
+field X(a)
+
+d_t(A) = -ka*A
+d_t(X) = -d_a(X)
+inflow  X at a=lower: ka*A
+outflow X at a=upper to C
+d_t(C) = -ke*C
+
+dose A at t=0, 3: D, 0.5*D
+observable central = C

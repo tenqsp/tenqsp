@@ -1,0 +1,58 @@
+name: CI
+
+# - each push to main and each pull request: lint + fast tests, Linux, Python 3.12 (not for
+#   documentation-only changes); an older run is cancelled when a newer push arrives;
+# - Mondays: Linux, Python 3.12 and 3.13, plus the slow tests;
+# - release tags and on demand: Linux, Windows, macOS x 3.12, 3.13, plus the slow tests and
+#   the fast tier on the JAX backend.
+# Jobs run only in the public repository (a private copy would spend paid minutes). The
+# documentation is built and published by docs.yml.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md"]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+
+jobs:
+  test:
+    if: ${{ github.repository == 'tenqsp/tenqsp' && !github.event.repository.private }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') && '["ubuntu-latest", "windows-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
+        python-version: ${{ fromJSON((github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["3.12", "3.13"]' || '["3.12"]') }}
+    runs-on: ${{ matrix.os }}
+    env:
+      FULL: ${{ github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      RELEASE: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: python -m pip install -e ".[dev,xarray,plot]" -c constraints.txt
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+      - name: Fast tests (on the full runs, Linux 3.12 also V12 and V7 over every compiled model)
+        run: pytest ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) && '--roundtrip --jacobian' || '' }}
+      - name: Slow tests (Mondays, tags, on demand)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && env.FULL == 'true'
+        run: pytest -m slow -o timeout=900
+      # GitHub's runners are 2-4x slower than the development machine: the per-test limit
+      # (120 s, there to catch a hang) is raised to 600 s for the JAX run
+      - name: V9, the fast tier on the JAX backend (tags, on demand)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && env.RELEASE == 'true'
+        run: pytest --backend=jax --replay -o timeout=600
+

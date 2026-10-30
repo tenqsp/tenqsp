@@ -1,0 +1,10 @@
+# conda env create -f environment.yml && conda activate tenqsp
+# then: python -m pip install -e ".[dev,xarray,plot]" -c constraints.txt
+name: tenqsp
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r constraints.txt

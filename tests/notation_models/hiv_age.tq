@@ -1,0 +1,19 @@
+# Gallery Model 8: target cells, virus, infected cells by infection age
+model hiv_age
+axis a in [0, 40] n=40 units=day kind=one_way
+param s=1e4, d=0.01, k=2.4e-8, delta=1, p=5000, c=23
+param eps_rt=0.3, eps_pi=0.2, pstar=1000, theta=1, a1=0.5
+
+field i(a) units=cells/mL/day
+compartment T units=cells/mL
+compartment V units=copies/mL
+
+d_t(i) = -d_a(i) - delta*i
+inflow  i at a=lower: (1 - eps_rt)*k*V*T
+outflow i at a=upper
+d_t(T) = s - d*T - (1 - eps_rt)*k*V*T
+d_t(V) = (1 - eps_pi)*int_a(p*i) - c*V
+
+T(0) = 1e6
+V(0) = 1e-3
+observable I = int_a(i)

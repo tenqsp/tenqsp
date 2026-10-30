@@ -1,0 +1,12 @@
+# A weighted field started as an amount at equal concentration, dosed into one element
+model dose
+axis s categorical [a, b]
+param V[s] = {a: 2, b: 8}
+param Vp=5
+field C(s) weights=V[s]
+compartment P volume=Vp
+d_t(C) = 0
+d_t(P) = 0
+C(0) = 10*shape(1)
+dose C[s=b] at t=1: 16
+dose P at t=1: 10

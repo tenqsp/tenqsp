@@ -1,0 +1,123 @@
+site_name: TenQSP
+site_description: Structured-population PDEs for quantitative systems pharmacology, in JAX
+site_url: https://tenqsp.github.io/tenqsp/
+repo_url: https://github.com/tenqsp/tenqsp
+repo_name: tenqsp/tenqsp
+edit_uri: ""
+docs_dir: docs
+strict: true
+validation:
+  omitted_files: info  # benchmarks and ADRs join the Background part later
+  anchors: warn
+
+# design notes, ADR drafts, the development log and private notes stay out of the site
+exclude_docs: |
+  /course/
+  /design/
+  /devlog.md
+  /language/
+  /simulation.md
+  /TenQSP_Example_Models.md
+  /tutorials/*.py
+  /tutorials/__pycache__/
+
+theme:
+  name: material
+  features:
+    - content.tabs.link        # choosing "Python" in one tab pair chooses it everywhere
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.arithmatex: {generic: true}
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed: {alternate_style: true}
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include: ["tutorials/_build/*.ipynb"]
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            docstring_style: numpy
+
+nav:
+  - Start here:
+      - index.md
+      - Install: start/install.md
+      - A first model: start/first-model.md
+      - Why PDEs in QSP: start/why-pdes.md
+  - User guide:
+      - guide/index.md
+      - Axes, fields and compartments: guide/axes-fields.md
+      - Reactions, transport and diffusion: guide/terms.md
+      - Categories and transitions: guide/transitions.md
+      - Boundary conditions: guide/boundaries.md
+      - Totals, integrals and ends: guide/integrals.md
+      - Starting values: guide/initial.md
+      - Doses and regimens: guide/doses.md
+      - Simulation and exploration: guide/simulation.md
+      - Gradients and sensitivities: guide/gradients.md
+      - Reading a model back: guide/explain.md
+      - Numerical choices: guide/numerics.md
+      - Troubleshooting: guide/troubleshooting.md
+  - Tutorials:
+      - tutorials/index.md
+      - 1 Transit compartments: tutorials/_build/01_transit_compartments.ipynb
+      - 2 Where in the gut: tutorials/_build/02_where_in_the_gut.ipynb
+      - 3 Myelosuppression: tutorials/_build/03_myelosuppression.ipynb
+      - 4 Lifespan response: tutorials/_build/04_lifespan_response.ipynb
+      - 5 Hepatic dispersion: tutorials/_build/05_hepatic_dispersion.ipynb
+      - 6 Whole-body PBPK: tutorials/_build/06_whole_body_pbpk.ipynb
+      - 7 Infection age: tutorials/_build/07_infection_age.ipynb
+      - 8 Age-structured population: tutorials/_build/08_age_structured_population.ipynb
+      - 9 Persisters and dormancy: tutorials/_build/09_persisters_and_dormancy.ipynb
+      - 10 Biofilm penetration: tutorials/_build/10_biofilm_penetration.ipynb
+      - 11 Phage plaque fronts: tutorials/_build/11_phage_plaque_fronts.ipynb
+      - 12 Drug tolerance continuum: tutorials/_build/12_drug_tolerance_continuum.ipynb
+  - Reference:
+      - Notation: reference/notation.md
+      - Python API:
+          - reference/api/index.md
+          - Building a model: reference/api/model.md
+          - Reading and writing text: reference/api/text.md
+          - Formula functions: reference/api/functions.md
+          - Regimens: reference/api/regimens.md
+          - Simulation: reference/api/simulation.md
+          - Derivatives: reference/api/derivatives.md
+          - Solutions and the ledger: reference/api/solution.md
+          - Plots: reference/api/plot.md
+          - Checks and errors: reference/api/errors.md
+  - Background:
+      - The numerical method: background/method.md
+      - How TenQSP is checked: background/verification.md
+      - Performance: background/performance.md
+  - Project:
+      - About: project/about.md

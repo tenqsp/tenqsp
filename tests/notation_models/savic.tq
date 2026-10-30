@@ -1,0 +1,13 @@
+# Gallery Model 2: the dose starts in the first of 4 erlang cells
+model savic
+axis z in [0, 1] n=4 kind=one_way
+param mtt=2, ka=1.2, cl_v=0.3
+field u(z)
+
+d_t(u) = -d_z(u/mtt)
+inflow  u at z=lower: 0
+outflow u at z=upper to Aa
+d_t(Aa) = -ka*Aa
+d_t(Ac) = ka*Aa - cl_v*Ac
+
+u(0) = 100*point(z, at=0.125)
