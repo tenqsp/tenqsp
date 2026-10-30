@@ -1944,7 +1944,8 @@ class _Reader:
         for issue in report.errors:
             st = self.statement_of(issue.where)
             if st is None:
-                self.problems.append(f"model ({issue.where}): {issue.message}")
+                where = "" if issue.where == "model" else f" ({issue.where})"
+                self.problems.append(f"model{where}: {issue.message}")
                 continue
             column = None
             c = re.search(r"at column (\d+) of '(.*?)'(?=[.,;:]?(?:\s|$))", issue.message)

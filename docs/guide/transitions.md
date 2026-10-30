@@ -117,7 +117,7 @@ The second equation, `d_t(B[s=active]) = …`, is an **equation on a slice**: it
 only where `s = active`, added to the field's own equation. In Python the same is done by
 passing a slice, `B.at(s="active")`, to `m.reaction` or `m.hazard`. In a formula, a slice
 `B[s=dormant]` reads the field there.
-[Tutorial 9](../tutorials/_build/09_persisters_and_dormancy.ipynb) builds this kind of model
+[Tutorial 9](../tutorials/09_persisters_and_dormancy.ipynb) builds this kind of model
 from a two-state switch up to a continuous dormancy axis.
 
 ## Production: daughters that carry a mutation
@@ -289,7 +289,7 @@ uptake back from cells, `PS2/Kp[organ]`, depends on the organ's partition coeffi
 
 A gut–liver example (the portal vein carries drug from the gut to the liver, which
 eliminates it; the full nine-organ model, with arterial and venous blood, is in
-[Tutorial 6](../tutorials/_build/06_whole_body_pbpk.ipynb)):
+[Tutorial 6](../tutorials/06_whole_body_pbpk.ipynb)):
 
 === "Notation"
 

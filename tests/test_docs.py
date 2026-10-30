@@ -52,7 +52,9 @@ def blocks(text: str) -> list[tuple[str, str, str | None]]:
 
 
 def is_model(code: str) -> bool:
-    return re.search(r"^model\s+\w+", code, re.M) is not None
+    """A whole model: its ``model`` line and more (the line alone shows the statement)."""
+    lines = [s for s in code.splitlines() if s.strip() and not s.lstrip().startswith("#")]
+    return re.search(r"^model\s+\w+", code, re.M) is not None and len(lines) > 1
 
 
 # pages that show what the scipy backend does (its Radau retry), skipped by --backend=jax

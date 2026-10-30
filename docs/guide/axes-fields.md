@@ -195,7 +195,7 @@ of a density.
 **A transit chain with cells of width 1.** If an axis runs from 0 to N in N cells, each cell
 has width 1, so density and amount are the same number and each cell is one transit
 compartment. This is the recommended way to write a NONMEM-style transit chain
-([Tutorial 3](../tutorials/_build/03_myelosuppression.ipynb)).
+([Tutorial 3](../tutorials/03_myelosuppression.ipynb)).
 
 ### Fields with weights: concentrations
 

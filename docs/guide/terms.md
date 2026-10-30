@@ -147,7 +147,7 @@ print(tq.Model.from_text(TRANSIT.format(n=5, scheme="")).explain().split("\n\n")
   against 0.22 s) and about 10× on a 30 × 40 phage model (7.3 s against 0.67 s). See
   [Numerical choices](numerics.md).
 
-[Tutorial 1](../tutorials/_build/01_transit_compartments.ipynb) shows the transit-chain
+[Tutorial 1](../tutorials/01_transit_compartments.ipynb) shows the transit-chain
 reading in detail.
 
 ## Diffusion
@@ -202,7 +202,7 @@ the velocity becomes `w - D0`:
 reads any equation with both terms back as the single-cell process it describes
 ("single cells follow dz = (w) dt + sqrt(2 D) dW"). `D` may vary through the coordinate; if
 it depends on a field, write the two terms yourself with `grad`.
-[Tutorial 12](../tutorials/_build/12_drug_tolerance_continuum.ipynb) uses this for a tumour's
+[Tutorial 12](../tutorials/12_drug_tolerance_continuum.ipynb) uses this for a tumour's
 continuum of drug tolerance.
 
 ## Losses

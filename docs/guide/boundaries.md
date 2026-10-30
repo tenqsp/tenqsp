@@ -347,7 +347,7 @@ this chapter wherever it says the same thing.
 ## See also
 
 - [Totals, integrals and ends](integrals.md): reading a field at an end in any formula.
-- [Tutorial 7](../tutorials/_build/07_infection_age.ipynb): HIV-infected cells by infection
+- [Tutorial 7](../tutorials/07_infection_age.ipynb): HIV-infected cells by infection
   age, with new infections entering at age 0.
-- [Tutorial 10](../tutorials/_build/10_biofilm_penetration.ipynb): drug penetration into a
+- [Tutorial 10](../tutorials/10_biofilm_penetration.ipynb): drug penetration into a
   biofilm.

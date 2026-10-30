@@ -12,7 +12,7 @@ import tenqsp as tq
 | [Building a model](model.md) | `tq.Model` and its methods; slices, conditions |
 | [Reading and writing text](text.md) | `tq.load`, `tq.table`, `tq.Model.from_text` |
 | [Formula functions](functions.md) | `tq.exp`, `tq.sigmoid`, …; shapes `tq.normal`, `tq.point`, … |
-| [Regimens](regimens.md) | `tq.bolus`, `tq.infusion`, `tq.regimen_from_table`, `tq.Regimen` |
+| [Regimens](regimens.md) | `tq.bolus`, `tq.infusion`, `tq.regimen_from_table`, `tq.regimens_from_table`, `tq.Regimen` |
 | [Simulation](simulation.md) | `tq.Scenario`, the simulator, results, grids, batches, pre-runs |
 | [Derivatives](derivatives.md) | `sim.function`, `sim.sensitivity` and what they return |
 | [Solutions and the ledger](solution.md) | what `m.solve` returns; the conservation ledger |

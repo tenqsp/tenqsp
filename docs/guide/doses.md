@@ -256,8 +256,25 @@ hours. The observation row (EVID 0) is skipped.
 Column names are case-insensitive, and `.` or an empty cell counts as missing. Other columns
 (`DV`, covariates) are not read. Some records are refused with a message rather than read
 differently from NONMEM: resets (EVID 3 or 4), steady-state doses (SS), a rate modelled in
-the model (RATE = -1 or -2), and a table with several subjects (give one ID at a time: one
-regimen per subject).
+the model (RATE = -1 or -2), and a table with several subjects (read it with
+`tq.regimens_from_table`, below).
+
+A table with several subjects gives one regimen per subject with `tq.regimens_from_table`,
+a dictionary from ID to regimen, in the order the subjects first appear. Each subject's rows
+are read by the same rules; a subject with only observation rows gets an empty regimen.
+
+```python
+df2 = pd.DataFrame({
+    "ID":   [1,   1,   2,   2,   3],
+    "TIME": [0,   12,  0,   24,  0],
+    "AMT":  [100, 100, 200, 0,   0],
+    "CMT":  [1,   1,   1,   2,   2],
+    "EVID": [1,   1,   1,   0,   0],
+})
+regimens = tq.regimens_from_table(df2, targets={1: "depot", 2: "centr"})
+print(list(regimens))        # [1, 2, 3]
+print(regimens[2])           # one bolus of 200 into depot at 0; subject 3 has none
+```
 
 ## Lag time and bioavailability
 

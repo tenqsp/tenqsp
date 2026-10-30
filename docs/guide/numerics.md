@@ -161,7 +161,7 @@ Savic absorption model: refining the grid does not converge to anything, it chan
 spread of the delay. That spread is often what you want: it is the between-cell variability
 of maturation times, of gut transit, of lifespans. Choose n for that spread (or estimate it),
 and write the axis with cells of width 1 so each cell is one compartment
-([Tutorial 1](../tutorials/_build/01_transit_compartments.ipynb)).
+([Tutorial 1](../tutorials/01_transit_compartments.ipynb)).
 
 **`sharp`** (`using sharp` at the end of the equation, `scheme="sharp"` in Python) is a
 second-order scheme (MUSCL with the van Leer limiter): a straight line in each cell, its slope

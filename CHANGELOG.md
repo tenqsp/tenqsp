@@ -5,12 +5,24 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- `tq.regimens_from_table`: one regimen per subject (`{ID: Regimen}`) from a NONMEM dose
+  table with several subjects.
+
 ### Fixed
+- A model with no states (no `d_t(...)` equation) is refused by `validate()` with a plain
+  message; it used to fail at the solve with a NumPy error.
 - `sim.function`: with a dose after the start time, the value could be NaN (with status
   "ok") when the right-hand side is not defined below zero, such as a Hill term `C^h` with
   a non-integer `h`.
 - `sim.function`: in a model with an extinction group, the gradient (`jax.grad`) could be
   NaN while the value and forward-mode derivatives were right, under the same condition.
+
+### Documentation
+- A page listing what TenQSP does not do yet (Start here → What TenQSP does not do yet).
+- Performance: a note on many subjects, and on padding scenarios to one shape (zero-amount
+  doses and extra output times change results within the solver's tolerance, tested).
+- Tutorial pages moved from `tutorials/_build/…` to `tutorials/…`.
 
 ## [0.6.0] — first public release
 

@@ -9,6 +9,8 @@ Doses given when a model is run, replacing the doses written in the model; see
 
 ::: tenqsp.regimen_from_table
 
+::: tenqsp.regimens_from_table
+
 ::: tenqsp.Regimen
 
 ::: tenqsp.Bolus

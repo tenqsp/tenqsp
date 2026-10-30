@@ -6,7 +6,7 @@
 The tutorials are plain Python files in "percent" format (`# %%` starts a code cell,
 `# %% [markdown]` a text cell), so the test suite runs them as scripts
 (tests/test_tutorials.py) and they cannot go stale. This script converts each to a notebook
-(jupytext), runs it (nbclient) and writes it to docs/tutorials/_build/ (not in git).
+(jupytext), runs it (nbclient) and writes it to docs/tutorials/ (not in git).
 Needs the `docs` extra: pip install -e ".[docs]".
 """
 
@@ -19,7 +19,7 @@ import jupytext
 import nbclient
 
 HERE = Path(__file__).parent
-OUT = HERE / "_build"
+OUT = HERE
 
 
 def tutorials(prefix: str = "") -> list[Path]:

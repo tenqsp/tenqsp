@@ -276,5 +276,5 @@ that says so.
 
 - [Boundary conditions](boundaries.md): what happens at the ends that `F(z=0)` reads.
 - [Starting values](initial.md): amounts and densities at time 0.
-- [Tutorial 6](../tutorials/_build/06_whole_body_pbpk.ipynb): weighted fields, slices and
+- [Tutorial 6](../tutorials/06_whole_body_pbpk.ipynb): weighted fields, slices and
   fluxes in a whole-body PBPK model.
