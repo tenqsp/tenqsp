@@ -75,6 +75,8 @@ def test_blas_runs_one_thread_while_tenqsp_factors_and_solves():
     from tenqsp import _threads
 
     before = [i["num_threads"] for i in threadpoolctl.threadpool_info() if i["user_api"] == "blas"]
+    if not before:  # e.g. Apple Accelerate on macOS: no BLAS thread pool that can be limited
+        pytest.skip("no BLAS thread pool that threadpoolctl can see")
     with _threads.blas_threads():
         inside = [
             i["num_threads"] for i in threadpoolctl.threadpool_info() if i["user_api"] == "blas"

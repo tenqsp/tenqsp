@@ -53,7 +53,9 @@ def test_statement_list_matches_the_reader():
 def test_notation_reference_covers(word):
     page = DOCS / "notation.md"
     assert page.exists(), "docs/reference/notation.md is missing"
-    assert mentioned(page.read_text(), word), f"'{word}' is not in the notation reference"
+    assert mentioned(page.read_text(encoding="utf-8"), word), (
+        f"'{word}' is not in the notation reference"
+    )
 
 
 PUBLIC = [n for n in tq.__all__ if n != "__version__"]
@@ -75,7 +77,7 @@ def test_model_methods_have_docstrings():
 
 @pytest.mark.parametrize("name", PUBLIC)
 def test_public_name_is_in_the_api_reference(name):
-    text = "\n".join(p.read_text() for p in sorted((DOCS / "api").glob("*.md")))
+    text = "\n".join(p.read_text(encoding="utf-8") for p in sorted((DOCS / "api").glob("*.md")))
     listed = set(re.findall(r"^::: tenqsp\.(\w+)", text, re.M))
     listed |= set(re.findall(r"^\s+- (\w+)$", text, re.M))  # members of a ::: tenqsp block
     listed |= set(re.findall(r"^\| `tq\.(\w+)\(", text, re.M))  # a row of a table
@@ -119,6 +121,6 @@ def test_every_source_file_carries_the_licence_header():
         str(p.relative_to(root))
         for folder in ("src", "tests")
         for p in sorted((root / folder).rglob("*.py"))
-        if "SPDX-License-Identifier: Apache-2.0" not in p.read_text()[:300]
+        if "SPDX-License-Identifier: Apache-2.0" not in p.read_text(encoding="utf-8")[:300]
     ]
     assert not bare, f"files without the SPDX licence header: {bare}"

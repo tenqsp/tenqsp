@@ -73,7 +73,7 @@ def test_page_examples_run(page, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # examples that save files write here
     ns: dict = {"__name__": "__docs__"}
     notation = None  # the model of the last "Notation" tab, waiting for its "Python" twin
-    for lang, code, tab in blocks(page.read_text()):
+    for lang, code, tab in blocks(page.read_text(encoding="utf-8")):
         if lang == "tq" and is_model(code):
             read = tq.Model.from_text(code)
             notation = read if tab == "Notation" else None
