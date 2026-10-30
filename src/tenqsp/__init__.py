@@ -70,7 +70,7 @@ from .regimen import (  # noqa: E402
 from .simulate import Scenario, SimResult, Simulator  # noqa: E402
 from .validate import ModelError, validate  # noqa: E402
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 __all__ = [
     "__version__",

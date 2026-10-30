@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The project follows semantic
 versioning; `0.x` releases may change the API.
 
-## [Unreleased]
+## [0.6.1] — 2026-10-31
 
 ### Added
 - `tq.regimens_from_table`: one regimen per subject (`{ID: Regimen}`) from a NONMEM dose
