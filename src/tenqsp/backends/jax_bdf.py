@@ -373,6 +373,7 @@ def bdf(
     rec_base=0,
     out_step=None,
     sens: tuple | None = None,
+    sens_out: bool = False,
     linear: LinearSolver = DENSE,
     skip=False,
 ) -> Result:
@@ -402,7 +403,10 @@ def bdf(
     ``sens=(fun_s, s0)``: carry the derivative ``s`` of the solution along a direction of its
     parameters, ``s' = fun_s(t, y, s)`` (the derivative of ``fun`` along ``(s, the direction)``)
     from ``s0``, and let its error steer the steps too (module docstring); its value at the
-    end is ``Result.s``.
+    end is ``Result.s``. ``s0`` may hold several directions side by side (``p x n`` entries),
+    each with its own derivative equation (``fun_s`` takes and returns them so), all in the
+    error test. ``sens_out``: the output rows hold the derivative at each output time too,
+    after the state (``ys`` then has ``n + p x n`` columns).
 
     ``skip``: take no step (a member of a batch whose own loop is done: nothing written to
     ``record``, see ``while_running``)."""
@@ -427,7 +431,20 @@ def bdf(
     if sens is not None:
         fun_s, s0 = sens
         s0 = jnp.asarray(s0, dtype=jnp.float64)
-        Ds0 = jnp.zeros((MAX_ORDER + 3, n)).at[0].set(s0).at[1].set(fun_s(t0, y0, s0) * h_abs)
+        m = s0.shape[0]  # one direction (n), or several side by side (p x n)
+        Ds0 = jnp.zeros((MAX_ORDER + 3, m)).at[0].set(s0).at[1].set(fun_s(t0, y0, s0) * h_abs)
+        p = m // n
+        atol_s = jnp.tile(atol, p)
+        if p == 1:
+            solve_s = linear.solve
+        elif linear is DENSE:  # every direction in one solve with the same factors
+
+            def solve_s(F, b):
+                return jsl.lu_solve(F, b.reshape(p, n).T).T.reshape(-1)
+        else:  # each direction with the same factorised matrix
+
+            def solve_s(F, b):
+                return jax.vmap(lambda bb: linear.solve(F, bb))(b.reshape(p, n)).reshape(-1)
     else:
         Ds0 = jnp.zeros((MAX_ORDER + 3, 0))
     carry_s = sens is not None
@@ -492,7 +509,7 @@ def bdf(
         nfev = c.nfev + n_iter
         if carry_s:  # the derivative's corrector, with the same matrix (module docstring)
             s_predict, psi_s = predict(Ds, order)
-            scale_s = atol + rtol * jnp.abs(s_predict)
+            scale_s = atol_s + rtol * jnp.abs(s_predict)
             conv_s, n_iter_s, s_new, ds = when(
                 converged,
                 lambda: _newton(
@@ -504,9 +521,9 @@ def bdf(
                     F,
                     scale_s,
                     newton_tol,
-                    linear.solve,
+                    solve_s,
                 ),
-                lambda: (jnp.bool_(False), jnp.int64(0), s_predict, jnp.zeros(n)),
+                lambda: (jnp.bool_(False), jnp.int64(0), s_predict, jnp.zeros_like(s_predict)),
             )
             converged = converged & conv_s
             nfev = nfev + n_iter_s
@@ -522,7 +539,7 @@ def bdf(
         scale_new = atol + rtol * jnp.abs(y_new)
         error_norm = _rms(error_const[order] * d / scale_new)
         if carry_s:
-            scale_s_new = atol + rtol * jnp.abs(s_new)
+            scale_s_new = atol_s + rtol * jnp.abs(s_new)
             error_norm = jnp.maximum(error_norm, _rms(error_const[order] * ds / scale_s_new))
         reject = converged & (error_norm > 1)
         accept = converged & ~reject
@@ -635,7 +652,10 @@ def bdf(
 
         def out_body(s):
             i, ys, os = s
-            ys = ys.at[i].set(dense(Dacc, t_new, h_abs_acc, order_acc, t_out[i]))
+            y_i = dense(Dacc, t_new, h_abs_acc, order_acc, t_out[i])
+            if sens_out:
+                y_i = jnp.concatenate([y_i, dense(Dsacc, t_new, h_abs_acc, order_acc, t_out[i])])
+            ys = ys.at[i].set(y_i)
             return i + 1, ys, None if os is None else os.at[i].set(row)
 
         i_out, ys, out_step_new = when(
@@ -720,7 +740,7 @@ def bdf(
         new_step=jnp.bool_(True),
         retry=jnp.bool_(False),
         current_jac=jnp.bool_(False),
-        ys=jnp.full((T, n), jnp.nan) if ys is None else ys,
+        ys=jnp.full((T, n + (Ds0.shape[1] if sens_out else 0)), jnp.nan) if ys is None else ys,
         i_out=jnp.asarray(i_out, dtype=jnp.int64),
         status=jnp.int64(OK),
         done=jnp.asarray(skip, dtype=bool),

@@ -114,8 +114,30 @@ earlier run than the others; the solver did not change between them.)
 ## Gradients
 
 A gradient or a table of sensitivities comes from `sim.function` and `sim.sensitivity`
-([Gradients and sensitivities](../guide/gradients.md)). Measured with every parameter in
-`wrt` and every state as an output, JAX solver:
+([Gradients and sensitivities](../guide/gradients.md)), by forward sensitivities or by
+record and replay (`derivatives=`).
+
+**Forward or reverse.** On transit chains of 5 to 400 states (CPU, milliseconds, one
+subject; [Benchmarks](../benchmarks.md#forward-or-reverse-derivatives-2026-10-31)):
+
+| States | Names in `wrt` | Solve | Gradient, forward | Gradient, reverse | Table (`jacfwd`), forward | Table, reverse |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 5 | 7 | **17** | 25 | **16** | 23 |
+| 40 | 40 | 20 | **112** | 160 | **107** | 274 |
+| 100 | 5 | 48 | **124** | 643 | **123** | 536 |
+| 100 | 50 | 53 | 749 | **665** | **712** | 1,355 |
+| 100 | 100 | 53 | 1,619 | **727** | **1,954** | 4,693 |
+| 400 | 50 | 1,641 | **8,541** | 15,069 | **8,534** | 16,413 |
+
+- **Forward costs 2–3 solves plus a fraction of a solve per name; reverse costs 3.5–13
+  solves for a gradient whatever the number of names.** They cross at 40–50 names for a
+  gradient; for a whole table forward was faster in every case. The default
+  (`derivatives="auto"`) is forward up to 40 names, reverse above.
+- **Forward needs no record**: 3.5 MB against 840 MB for a batch of 4 on the 61-state toy
+  phage model with 12 names.
+
+The tables below were measured with reverse derivatives (record and replay), every
+parameter in `wrt` and every state as an output, JAX solver:
 
 | Model | States | Parameters | Forward solve (s) | `f(x)` (s) | `jax.jacfwd` (s) | `jax.grad` (s) | Gradient ÷ forward |
 |---|---:|---:|---:|---:|---:|---:|---:|

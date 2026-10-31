@@ -394,6 +394,7 @@ def _program(
     max_steps: int,
     record: int = 0,
     steer: bool = False,
+    forward: int = 0,
 ):
     """The jitted solve for this model and these options, built once (shared by every model
     with the same structure, like the rest of the build). ``record``: if positive, the run
@@ -405,13 +406,27 @@ def _program(
     ``sens=``). The derivative is carried across boundaries with the jump a moving dose or
     infusion boundary makes (the right-hand side before minus after, times how fast the
     boundary moves); across an event it is kept as it is (zero for a group zeroed there):
-    it only chooses steps, the derivatives themselves come from the replay."""
+    it only chooses steps, the derivatives themselves come from the replay.
+
+    ``forward`` (a number of directions p): forward sensitivities, no record and no replay.
+    ``dot=`` then holds p directions (a leading axis of p on each entry); the derivative of
+    the solution along each is carried with it (all in the error test) and written at the
+    output times after the state (``ys``: n + p x n columns, direction by direction). Across
+    a moving boundary it jumps as above; across an event, by its time's derivative
+    (implicit: dt* = -(dg along the direction) / (dg/dt)), s+ = Z (s- + f- dt*) - f+ dt*,
+    with Z the zeroing of the groups that die there. These are the derivatives of the exact
+    solution, computed to the solver's tolerance (the replay's are those of the computed
+    solution, to round-off)."""
     if record and ledger:
         raise ValueError("A recorded run has no ledger.")
     if steer and ledger:
         raise ValueError("A steered run has no ledger.")
+    if forward and (ledger or record or steer):
+        raise ValueError("A forward-sensitivity run has no ledger, record or steering.")
+    P = forward
     key = ("jax_program", ledger, model_doses, max_steps) + ((record,) if record else ())
     key += ("steer",) if steer else ()
+    key += (("forward", forward),) if forward else ()
     key += ("sparse",) if tier(cm) == "sparse" else ()
     if key in cm._lazy:
         return cm._lazy[key]
@@ -472,18 +487,27 @@ def _program(
         if model_doses:
             b_amount = jnp.zeros_like(b_time)
         primals = (theta, b_time, b_amount, i_start, i_stop, i_rate)
-        if steer:
+        carry = steer or P
+        if carry:
             names_in = ("theta", "b_time", "b_amount", "i_start", "i_stop", "i_rate")
+            lead = (P,) if P else ()
             tangents = tuple(
-                jnp.zeros_like(p) if dot.get(k) is None else dot[k]
+                jnp.zeros(lead + p.shape) if dot.get(k) is None else dot[k]
                 for k, p in zip(names_in, primals, strict=True)
             )
-            got, dgot, bad_arrival = jax.jvp(inputs, primals, tangents, has_aux=True)
-            theta_dot = tangents[0]
+
+            def jvp_inputs(tangents):
+                return jax.jvp(inputs, primals, tangents, has_aux=True)
+
+            if P:  # p directions at once
+                got, dgot, bad_arrival = jax.vmap(jvp_inputs, out_axes=(None, 0, None))(tangents)
+            else:
+                got, dgot, bad_arrival = jvp_inputs(tangents)
+            theta_dot = theta_dot_raw = tangents[0]
             if slot is not None:  # constant on each segment: not moved here
-                theta_dot = theta_dot.at[slot].set(0.0)
+                theta_dot = theta_dot.at[..., slot].set(0.0)
             if floor_slot.size:
-                theta_dot = theta_dot.at[floor_slot].set(0.0)
+                theta_dot = theta_dot.at[..., floor_slot].set(0.0)
             _, _, b_time_dot, i_start_dot, i_stop_dot, rise_dot, i_rise_dot, y0_dot = dgot
         else:
             got, bad_arrival = inputs(*primals)
@@ -495,6 +519,17 @@ def _program(
             )
         else:
             sw_times, sw_over = jnp.full((1,), jnp.inf), jnp.bool_(False)
+        sw_dot = jnp.zeros((P, sw_times.shape[0])) if P else None
+        if P and slot is not None:  # the switch times move with theta
+
+            def sw_along(thd):
+                return jax.jvp(
+                    lambda th: cm.switch_times_jax(th, t0, t1, sw_capacity.shape[0]),
+                    (theta,),
+                    (thd,),
+                )[1]
+
+            sw_dot = jnp.where(jnp.isfinite(sw_times), jax.vmap(sw_along)(theta_dot_raw), 0.0)
         # a regimen moved out of range (sim.function at a new x; solve checks on the host)
         bad_regimen = (
             jnp.any(b_time < t0)
@@ -547,10 +582,16 @@ def _program(
             """The derivative just after the boundary at ``at`` (moving at ``at_dot``): its
             doses' amounts, and the jump of the right-hand side (before minus after)."""
             hit = b_time == at
-            s = s_before.at[b_index].add(jnp.where(hit, rise_dot, 0.0))
             th_a, u_a, _ = segment_inputs(at, armed_after)
             f_after = rhs(at, z_after, th_a, geom) + u_a
-            return s + (f_before - f_after) * at_dot
+
+            def one(at_dot, s_before, rise_dot):
+                s = s_before.at[b_index].add(jnp.where(hit, rise_dot, 0.0))
+                return s + (f_before - f_after) * at_dot
+
+            return (
+                jax.vmap(one)(at_dot, s_before, rise_dot) if P else one(at_dot, s_before, rise_dot)
+            )
 
         def next_boundary(a):
             """The next boundary after ``a``, and which candidate it is (for the replay:
@@ -570,6 +611,43 @@ def _program(
         def seg_cond(s):
             return (s["a"] < t1) & (s["status"] == OK)
 
+        def ev_raw(t, z, th):  # the events' values (groups, then switches), theta's measure
+            v = (cm._measure_impl(th, geom)[None, :] * members) @ z[:n] - thr
+            return jnp.concatenate([v, switch_values(t, z, th)]) if E else v
+
+        def event_jump(r, k, th, u, S, z_ev, zm, armed_ev, dosed, b, d_watch):
+            """Forward sensitivities just after the event that ended this segment (``forward``
+            in the docstring): the event time moves with each direction; the solution's slope
+            before and after it is the right-hand side on each side (a switch: read just off
+            the crossing, on either side, as the replay does)."""
+            t_e, y_e = r.t, r.y
+            grad_g = jax.grad(lambda zz: ev_raw(t_e, zz, th)[k])(y_e)
+            is_switch = k >= G
+            v_dir = d_watch[jnp.maximum(k - G, 0)] if E else 0.0
+            f_mid = rhs(t_e, y_e, th, geom) + u
+            rate0 = jnp.vdot(grad_g, f_mid)
+            # the side the run came from: g had the sign opposite to the watched crossing
+            before = jnp.where(v_dir != 0, -v_dir, -jnp.sign(rate0))
+            norm = jnp.sqrt(jnp.sum(grad_g**2))
+            nudge = 1e-8 * jnp.max(jnp.abs(y_e)) / jnp.where(norm == 0, 1.0, norm)
+            off = jnp.where(is_switch, nudge, 0.0) * grad_g
+            f_before = rhs(t_e, y_e + before * off, th, geom) + u
+            th_n, u_n, _ = segment_inputs(t_e, armed_ev)
+            f_after = rhs(t_e, z_ev - before * off, th_n, geom) + u_n
+            g_t = jax.jvp(lambda tt: ev_raw(tt, y_e, th)[k], (t_e,), (jnp.ones_like(t_e),))[1]
+            rate = g_t + jnp.vdot(grad_g, f_before)
+            keep = ~jnp.any(zm[:, None] & members, axis=0) if G else jnp.ones(n, dtype=bool)
+            keep = jnp.concatenate([keep, jnp.ones(n_all - n, dtype=bool)])
+            hit = (b_time == b) & dosed
+
+            def one(s_, theta_dot, rise_dot):
+                dg = jax.jvp(lambda zz, tt: ev_raw(t_e, zz, tt)[k], (y_e, th), (s_, theta_dot))[1]
+                dt = -dg / jnp.where(rate == 0, 1.0, rate)
+                s_new = jnp.where(keep, s_ + f_before * dt, 0.0) - f_after * dt
+                return s_new.at[b_index].add(jnp.where(hit, rise_dot, 0.0))
+
+            return jax.vmap(one)(S, theta_dot, rise_dot)
+
         def seg_body(s):
             a = s["a"]
             b, b_which = next_boundary(a)
@@ -581,6 +659,7 @@ def _program(
             on = (i_start <= mid) & (mid < i_stop)
             u = jnp.zeros(n_all).at[i_index].add(jnp.where(on, i_rise, 0.0))
             d = jnp.where(s["fresh"], aim(a, s["z"], th), s["d"]) if E else s["d"]
+            d_watch = d
 
             def fun(t, z):
                 return rhs(t, z, th, geom) + u
@@ -596,17 +675,29 @@ def _program(
                 return jac_of(t, z, th)
 
             sens = None
-            if steer:
-                u_dot = jnp.zeros(n_all).at[i_index].add(jnp.where(on, i_rise_dot, 0.0))
+            if carry:
 
-                def fun_s(t, z, s_):  # the derivative of fun along (s_, the direction)
+                def u_along(i_rise_dot):
+                    return jnp.zeros(n_all).at[i_index].add(jnp.where(on, i_rise_dot, 0.0))
+
+                u_dot = jax.vmap(u_along)(i_rise_dot) if P else u_along(i_rise_dot)
+
+                def along(t, z, s_, theta_dot, u_dot):
                     return jax.jvp(
                         lambda z_, th_, u_: rhs(t, z_, th_, geom) + u_,
                         (z, th, u),
                         (s_, theta_dot, u_dot),
                     )[1]
 
-                sens = (fun_s, s["zs"])
+                def fun_s(t, z, s_):  # the derivative of fun along (s_, the direction)
+                    if not P:
+                        return along(t, z, s_, theta_dot, u_dot)
+                    S_ = s_.reshape(P, n_all)
+                    return jax.vmap(along, in_axes=(None, None, 0, 0, 0))(
+                        t, z, S_, theta_dot, u_dot
+                    ).reshape(-1)
+
+                sens = (fun_s, s["zs"].reshape(-1))
 
             r = bdf(
                 fun,
@@ -629,6 +720,7 @@ def _program(
                 skip=~seg_cond(s),
                 out_step=s["out_step"] if record else None,
                 sens=sens,
+                sens_out=bool(P),
                 linear=linear,
             )
             ok, at_event = r.status == OK, r.status == EVENT
@@ -668,14 +760,21 @@ def _program(
             z_ev = jnp.where(dosed, apply_doses(z_ev, b), z_ev)
             armed_ev = armed_ev | (dosed & (totals(z_ev) >= thr))
             z_end = jnp.where(ok, z_ok, jnp.where(at_event, z_ev, r.y))
-            if steer:
+            if carry:
+                r_s = r.s.reshape(P, n_all) if P else r.s
+                sw_d = sw_dot if P else jnp.zeros_like(sw_times)
+                lead = (P,) if P else ()
                 cands_dot = jnp.concatenate(
-                    [b_time_dot, i_start_dot, i_stop_dot, jnp.zeros_like(sw_times), jnp.zeros(1)]
+                    [b_time_dot, i_start_dot, i_stop_dot, sw_d, jnp.zeros(lead + (1,))],
+                    axis=-1,
                 )
-                b_dot = jnp.where(b < t1, cands_dot[b_which], 0.0)
-                zs_ok = across(b, b_dot, r.y, z_ok, r.s, fun(b, r.y), armed_ok)
-                zs_ev = jnp.where(z_ev == r.y, r.s, 0.0)  # zeroed there: no derivative
-                zs_end = jnp.where(ok, zs_ok, jnp.where(at_event, zs_ev, r.s))
+                b_dot = jnp.where(b < t1, cands_dot[..., b_which], 0.0)
+                zs_ok = across(b, b_dot, r.y, z_ok, r_s, fun(b, r.y), armed_ok)
+                if P and (G or E):
+                    zs_ev = event_jump(r, k, th, u, r_s, z_ev, zm, armed_ev, dosed, b, d_watch)
+                else:
+                    zs_ev = jnp.where(z_ev == r.y, r_s, 0.0)  # zeroed there: no derivative
+                zs_end = jnp.where(ok, zs_ok, jnp.where(at_event, zs_ev, r_s))
             armed = jnp.where(ok, armed_ok, jnp.where(at_event, armed_ev, armed))
             switched = at_event & (r.event >= G)
             extra = {}
@@ -725,7 +824,7 @@ def _program(
                 "nlu": s["nlu"] + r.nlu,
                 "segments": s["segments"] + 1,
                 **extra,
-                **({"zs": zs_end} if steer else {}),
+                **({"zs": zs_end} if carry else {}),
             }
 
         zero = jnp.int64(0)
@@ -742,7 +841,7 @@ def _program(
                 "n": zero,
             },
             "fresh": jnp.bool_(True),
-            "ys": jnp.full((t_out.shape[0], n_all), jnp.nan),
+            "ys": jnp.full((t_out.shape[0], n_all * (1 + P)), jnp.nan),
             "i_out": zero,
             "status": jnp.select(
                 [bad_arrival, bad_regimen, sw_over], [BAD_ARRIVAL, BAD_REGIMEN, SWITCH_CAPACITY], OK
@@ -758,17 +857,17 @@ def _program(
             "nlu": zero,
             "segments": zero,
         }
-        if steer:  # the start: the initial values, then any doses at t0
+        if carry:  # the start: the initial values, then any doses at t0
             th_0, u_0, _ = segment_inputs(t0, state["armed"])
             f_0 = rhs(t0, z, th_0, geom) + u_0
             # a dose at t0 that moves: the start runs undosed until it (f before)
             at_t0 = b_time == t0
             state["zs"] = across(
                 t0,
-                jnp.where(jnp.any(at_t0), b_time_dot[jnp.argmax(at_t0)], 0.0),
+                jnp.where(jnp.any(at_t0), b_time_dot[..., jnp.argmax(at_t0)], 0.0),
                 z,
                 z_start,
-                jnp.concatenate([y0_dot, jnp.zeros(n_all - n)]),
+                jnp.concatenate([y0_dot, jnp.zeros(y0_dot.shape[:-1] + (n_all - n,))], axis=-1),
                 f_0,
                 state["armed"],
             )
@@ -796,7 +895,8 @@ def _program(
         )
         # output times at the end: after the doses there (scipy backend: the same)
         last = (t_out == t1)[:, None] & (jnp.arange(t_out.shape[0]) >= s["i_out"])[:, None]
-        ys = jnp.where(last, s["z"], s["ys"])
+        z_last = jnp.concatenate([s["z"], s["zs"].reshape(-1)]) if P else s["z"]
+        ys = jnp.where(last, z_last, s["ys"])
         return {**s, "ys": ys, "t": s["a"], "b_amount": b_amount}
 
     jitted = jax.jit(program)

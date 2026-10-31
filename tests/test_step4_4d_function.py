@@ -134,13 +134,16 @@ def test_failures_give_nan_with_a_reason(oral):
 def test_a_run_needing_more_steps_than_the_record_holds_is_nan():
     m = tq.Model.from_text("param w = 1\ncompartment X, Y\nd_t(X) = w*Y\nd_t(Y) = -w*X\nX(0) = 1\n")
     sim = m.simulator(outputs=["X"], rtol=1e-8, atol=1e-10)
-    f = sim.function(tq.Scenario(times=[10.0]), wrt=["w"])
+    f = sim.function(tq.Scenario(times=[10.0]), wrt=["w"], derivatives="reverse")
     assert np.isfinite(f(f.x0)["X"][0]) and np.isclose(f(f.x0)["X"][0], np.cos(10), atol=1e-6)
     fast = jnp.array([200.0])
     assert (
         f.status(fast) == "too many steps for the record (make a new sim.function(...) at this x)"
     )
     assert np.isnan(f(fast)["X"][0])
+    # forward sensitivities keep no record: the same x simply runs
+    g = sim.function(tq.Scenario(times=[10.0]), wrt=["w"], derivatives="forward")
+    assert g.status(fast) == "ok" and np.isclose(g(fast)["X"][0], np.cos(2000), atol=1e-4)
 
 
 def test_jit_vmap_and_compile_once(oral):

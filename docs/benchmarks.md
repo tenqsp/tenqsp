@@ -444,3 +444,38 @@ process (as `tests/test_tutorials.py` does), seconds.
 
 All twelve run. For a workshop, 02 (about 4 minutes: about fifteen solves of the 212-state model, most at tolerances of 1e-8 to 1e-10)
 and 11 (2 minutes, fronts at 10^4 states) are the ones to precompute or shorten.
+
+## Forward or reverse derivatives (2026-10-31)
+
+`python benchmarks/forward_or_reverse.py`, one case per process, one after another. The
+machine was not idle (other users' processes), so each time is good to about ±20 %.
+
+A transit chain of n compartments, the n split into p groups that share an exit rate (p
+parameters, all in `wrt`); rtol 1e-6, 12 output times, one subject. Milliseconds; in
+brackets, the derivative's cost in plain solves (`derivatives=False`).
+
+| States | Names | Solve | `jax.grad`, forward | `jax.grad`, reverse | `jax.jacfwd`, forward | `jax.jacfwd`, reverse |
+|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 5 | 7 | **17** (2.4) | 25 (3.5) | **16** | 23 |
+| 10 | 10 | 10 | **18** | 30 | **19** | 27 |
+| 20 | 20 | 10 | **32** | 47 | **32** | 95 |
+| 40 | 40 | 20 | **112** | 160 | **107** | 274 |
+| 100 | 5 | 48 | **124** (2.6) | 643 (13) | **123** | 536 |
+| 100 | 10 | 135 | **141** | 665 | **142** | 665 |
+| 100 | 20 | 51 | **202** | 668 | **214** | 786 |
+| 100 | 50 | 53 | 749 | **665** | **712** | 1,355 |
+| 100 | 100 | 53 | 1,619 | **727** | **1,954** | 4,693 |
+| 400 | 10 | 1,684 | **4,081** | 14,723 | **4,075** | 12,062 |
+| 400 | 50 | 1,641 | **8,541** | 15,069 | **8,534** | 16,413 |
+
+- **Reverse costs 3.5 to 13 solves for a gradient, flat in the number of names**; forward
+  costs 2–3 solves and a fraction of a solve more for each name (about a third of a solve at
+  100 states, a fifteenth at 400).
+- **For a gradient they cross at 40–50 names** at 100 states; at 400 states forward was still
+  1.8 times faster with 50.
+- **For a whole table of derivatives (`jax.jacfwd`) forward was faster in every case**,
+  2.4 times at 100 names: reverse makes one backward pass per output time.
+- So `derivatives="auto"` picks forward up to 40 names, reverse above.
+- **Memory.** With 12 names on the 61-state toy phage model, a batch of 4 (`jax.vmap`) needed
+  3.5 MB of working memory forward and 840 MB reverse (XLA's compile-time estimate); without
+  derivatives, 1 MB.

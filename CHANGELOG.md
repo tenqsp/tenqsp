@@ -5,7 +5,22 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- `sim.function(..., derivatives="forward")`: forward sensitivities. The run carries the
+  derivative of every state with respect to every name in `wrt`, with no record and no
+  replay. Cost grows with the number of names (2–3 solves plus a fraction of a solve per
+  name); memory stays small (a batch of 4 on a 61-state model with 12 names: 3.5 MB
+  against 840 MB). `derivatives="reverse"` is the record and replay as before.
+  `f.derivatives` says which a function uses.
+
 ### Changed
+- `sim.function`'s default is now `derivatives="auto"`: forward up to 40 names in `wrt`,
+  reverse above (`True`, the old default, means `"auto"`). Measured on the CPU, forward was
+  faster for every whole table of derivatives (`jax.jacfwd`) and, for a gradient
+  (`jax.grad`), up to 40–50 names: 12 theophylline subjects in one `jax.vmap` call, 111 ms
+  to 32 ms per gradient. Results agree with reverse to the solver's tolerance. A function
+  made by `"auto"` keeps no record, so the status "too many steps for the record" no longer
+  occurs with it.
 - `sim.function` derivatives: the replay skips the unused room in its record in blocks
   instead of step by step, forward and in reverse. Same results; a gradient of a small model
   costs about half as much (one theophylline subject: 54 ms to 24 ms).

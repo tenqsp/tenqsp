@@ -171,10 +171,38 @@ model structure; after that, new values reuse the build.
 
 ## How the derivatives are computed
 
-**Record and replay.** At each `x`, `f` runs the model once, keeping a record of every step
-it took, then replays that record to get the derivatives. The derivatives are therefore those
-of the computed solution, step for step: consistent with the outputs, which is what an
-optimizer needs.
+`f` gets its derivatives in one of two ways, chosen by `derivatives=`:
+
+```python
+f = sim.function(sc, wrt=["CL", "V"])                          # "auto", the default
+print(f.derivatives)                   # forward
+fr = sim.function(sc, wrt=["CL", "V"], derivatives="reverse")  # always reverse
+assert np.allclose(jax.jacfwd(f)(f.x0)["conc"], jax.jacfwd(fr)(fr.x0)["conc"], rtol=1e-6)
+```
+
+**Forward** (forward sensitivities). At each `x`, the run carries the derivative of every
+state with respect to every name in `wrt` alongside the solution, as Stan, nlmixr2 and
+CVODES do. The cost grows with the number of names; nothing is kept beyond the run, so it
+needs little memory. It gives the whole table of derivatives (every output time × every
+name), which is what Levenberg–Marquardt, Gauss–Newton or FOCE-type fits use.
+
+**Reverse** (record and replay). At each `x`, `f` runs the model once, keeping a record of
+every step it took, then goes back through that record to get the derivatives. A gradient
+of one number (`jax.grad` of an objective) then costs the same whatever the number of names,
+but the record takes memory, and a whole table (`jax.jacfwd`) costs more than forward.
+
+**"auto"** picks forward up to 40 names in `wrt` and reverse above. Measured on the CPU
+([Performance](../background/performance.md)):
+
+- forward was faster for every table of derivatives (`jax.jacfwd`), up to 100 names;
+- for a gradient (`jax.grad`), forward was faster up to about 40–50 names; above that, reverse;
+- with 12 names on a 61-state model, a batch of 4 needed 3.5 MB forward and 840 MB reverse.
+
+Set `derivatives=` yourself when you know better: `"forward"` for a least-squares fit with
+many parameters, `"reverse"` for a gradient-based sampler (NUTS) with many.
+
+Either way the derivatives are those of the computed solution, consistent with the outputs,
+which is what an optimizer needs. The two agree to the solver's tolerance.
 
 **Steps chosen for the derivative too.** The solver chooses its steps to keep the
 derivatives accurate as well as the solution. This matters when the solution sits still but
@@ -189,8 +217,9 @@ error, so an optimizer can step back. `f.status(x)` says `"ok"` or why the run f
 print(f.status(f.x0))                  # ok
 ```
 
-**The record has room** for 4 times the steps of the run at `f.x0` (2 times on models above
-2,000 states, to halve the memory a gradient needs there). An `x` that needs more gives NaN,
+**The record has room** (reverse only) for 4 times the steps of the run at `f.x0` (2 times on
+models above 2,000 states, to halve the memory a gradient needs there). An `x` that needs more
+gives NaN,
 with the status "too many steps for the record (make a new sim.function(...) at this x)":
 build a new function at values closer to the ones you need.
 
@@ -210,7 +239,7 @@ pop = jax.vmap(g)(X)                   # X: one row per patient, in g.names orde
 
 It is the same function (`g.names`, `g.x0`, `g(x)`, `g.status(x)`, `jax.jit`, `jax.vmap`),
 but the runs are not recorded or replayed and the steps are chosen for the solution alone.
-So it needs a few MB per member instead of tens to hundreds, and is 2–5 times faster. Its
+So it needs a few MB per member, and is 2–5 times faster than reverse derivatives. Its
 outputs equal those of a function with derivatives to the solver's tolerance. `jax.grad`
 or `jax.jacfwd` of it raise an error saying so.
 
@@ -218,15 +247,15 @@ or `jax.jacfwd` of it raise an error saying so.
 
 Measured on the benchmark models (CPU):
 
-- one call `f(x)` costs about 2 to 4 forward solves (the run, then its replay; steps chosen
-  for the derivative add a few);
-- a reverse-mode gradient (`jax.grad`) costs 4–10 forward solves, whatever the number of
-  parameters;
-- `jax.jacfwd` grows with the number of parameters, and is the cheaper of the two for a few
-  parameters on small models;
+- forward: one call `f(x)` with its derivatives costs about 2–3 forward solves, plus a
+  fraction of a solve for each name in `wrt` (a third of a solve each on a 100-state model,
+  less on larger ones); `jax.grad` and `jax.jacfwd` cost the same;
+- reverse: one call `f(x)` costs about 2 to 4 forward solves (the run, then its replay); a
+  gradient (`jax.grad`) costs 4–13 forward solves, whatever the number of names; `jax.jacfwd`
+  grows with the number of names;
 - `jax.vmap(f)` over many parameter sets gives what one call per set gives. The sets run in
-  lockstep, so each step costs what the most demanding set needs, and each member carries
-  its own record of the run, so memory grows with the batch.
+  lockstep, so each step costs what the most demanding set needs. With reverse, each member
+  carries its own record of the run, so memory grows with the batch.
 
 Measured times and memory, by model size, CPU and GPU, are on the
 [Performance](../background/performance.md) page.

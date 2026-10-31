@@ -4,15 +4,24 @@
 
 - ``Function`` (``sim.function(scenario, wrt=[...])``): the simulation as a JAX
   function of the numbers named in ``wrt``, ``f(x) -> {output: array}``. At each ``x`` it runs
-  the JAX solver (no derivative through its choice of steps) and replays that run
-  (``jax_replay``), whose arithmetic carries the derivatives. The run's
-  steps are chosen for the derivatives too (design note §6.3, design decision 2026-10-25):
-  the run carries the derivative along one direction mixing every ``wrt`` number (each moved
-  in proportion to its value, with fixed random signs and weights, so none cancels another),
-  whose error steers the steps as the solution's does. So ``f`` is
-  pure JAX: ``jax.grad``, ``jax.jacfwd``, ``jax.jit`` and ``jax.vmap`` all work on it. A run
-  that fails gives NaN outputs (and NaN derivatives) rather than an error, so an optimizer
-  can step back; ``f.status(x)`` says why.
+  the JAX solver (no derivative through its choice of steps), and the derivatives come in
+  one of two ways (``derivatives=``; "auto" picks forward up to ``FORWARD_MAX`` numbers in
+  ``wrt``, reverse above, design decision 2026-10-31):
+
+  - ``"forward"``: the run carries the derivative of the solution along each ``wrt`` number
+    (forward sensitivities, ``jax_backend._program(forward=p)``), and ``jax.jvp``,
+    ``jax.jacfwd`` and ``jax.grad`` read them. Cost grows with the number of names; no
+    record. Every derivative's error steers the steps, as the solution's does.
+  - ``"reverse"``: the run is recorded and replayed (``jax_replay``), and the replay's
+    arithmetic carries the derivatives; ``jax.grad`` costs the same whatever the number of
+    names. The steps are chosen for the derivatives too (design note §6.3, design decision
+    2026-10-25): the run carries the derivative along one direction mixing every ``wrt``
+    number (each moved in proportion to its value, with fixed random signs and weights, so
+    none cancels another), whose error steers the steps as the solution's does.
+
+  Either way ``f`` is pure JAX: ``jax.grad``, ``jax.jacfwd``, ``jax.jit`` and ``jax.vmap``
+  all work on it. A run that fails gives NaN outputs (and NaN derivatives) rather than an
+  error, so an optimizer can step back; ``f.status(x)`` says why.
 - ``Sensitivity`` (``sim.sensitivity(scenario, wrt=[...])``): d output / d each name at
   every output time, once, at the scenario's values (forward mode); a failing run raises.
 
@@ -42,6 +51,10 @@ from tenqsp.backends import jax_backend as jb
 from tenqsp.backends import jax_replay
 from tenqsp.backends.jax_bdf import OK, STATUS_TEXT
 
+DERIVATIVES = ("auto", "forward", "reverse")
+FORWARD_MAX = 40  # "auto": forward sensitivities up to this many wrt numbers, reverse above
+# (design decision 2026-10-31: forward is cheaper below it for gradients, and for every
+# full Jacobian measured; docs/benchmarks.md, "Forward or reverse")
 RECORD_ROOM = 4  # the record holds 4x the steps of the run at the scenario's values,
 RECORD_ROOM_LARGE = 2  # 2x on models above LARGE_STATES (design decision 2026-10-25, design
 LARGE_STATES = 2_000  # note step4_5_sparse_tier.md §5.2: memory grows with states x room)
@@ -73,14 +86,19 @@ class Function:
     """The simulation as a JAX function of the numbers named in ``wrt`` (see the module
     docstring). ``f.names``: what each entry of ``x`` is; ``f.x0``: their values in the
     scenario; ``f(x)``: ``{output: array (n_t, ...)}``; ``f.unpack(x)``: ``x`` by name;
-    ``f.status(x)``: ``"ok"`` or why the run at ``x`` failed (outputs NaN)."""
+    ``f.status(x)``: ``"ok"`` or why the run at ``x`` failed (outputs NaN);
+    ``f.derivatives``: ``"forward"``, ``"reverse"`` or ``False``."""
 
-    def __init__(self, sim, scenario=None, *, wrt: Sequence[str], derivatives: bool = True):
+    def __init__(self, sim, scenario=None, *, wrt: Sequence[str], derivatives="auto"):
         from tenqsp.simulate import Scenario, _ModelDoses
 
-        if not isinstance(derivatives, bool):
-            raise TypeError("derivatives= is True or False.")
-        self.derivatives = derivatives
+        if derivatives is True:  # the default before "auto" existed
+            derivatives = "auto"
+        if derivatives is not False and derivatives not in DERIVATIVES:
+            raise TypeError(
+                "derivatives= is 'auto' (the default), 'forward', 'reverse' or False, "
+                f"not {derivatives!r}."
+            )
         sc = scenario if scenario is not None else Scenario()
         if not isinstance(sc, Scenario):
             raise TypeError(f"The first argument is a tq.Scenario, not {sc!r}.")
@@ -116,6 +134,17 @@ class Function:
         self.x0 = _x0(run, where, regimen)
         self._data = _data(run, where, regimen)
         self._n_t = run.t_out.size
+        if derivatives == "auto":
+            derivatives = "forward" if len(self.names) <= FORWARD_MAX else "reverse"
+        self.derivatives = derivatives
+        if derivatives == "forward":  # sensitivities carried along the run: no record
+            probe = jb._program(cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps)
+            args, _ = _inputs(jnp.asarray(self.x0), self._data, run.model_doses)
+            jb._check(cm, probe(**args), run)  # a scenario that does not run is an error here
+            self.capacity = 0
+            p = len(self.names)
+            self._impl = _sens_program(cm, run.model_doses, max_steps, self.outputs, p)
+            return
         if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
             probe = jb._program(cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps)
             args, _ = _inputs(jnp.asarray(self.x0), self._data, run.model_doses)
@@ -511,6 +540,69 @@ def _function_program(cm, model_doses: bool, capacity: int, max_steps: int, outp
     return jitted
 
 
+_REGIMEN = ("theta", "b_time", "b_amount", "i_start", "i_stop", "i_rate")
+
+
+def _sens_program(cm, model_doses: bool, max_steps: int, outputs, p: int):
+    """``impl(x, data) -> ({output: (T, ...)}, status)`` with forward sensitivities: one run
+    carries the derivative of the solution along each entry of ``x`` (``jax_backend._program``,
+    ``forward``), and ``jax.jvp``/``jax.grad`` read them (a linear map of the tangent, so
+    reverse mode transposes it): no record and no replay. Jitted once per model structure,
+    these options and the number of entries of ``x``."""
+    key = ("jax_sens_function", model_doses, max_steps, tuple(outputs), p, jb.tier(cm))
+    if key in cm._lazy:
+        return cm._lazy[key]
+    run_program = jb._program(
+        cm, ledger=False, model_doses=model_doses, max_steps=max_steps, forward=p
+    )
+    outputs_of = _outputs_of(cm, outputs)
+    n = cm.n_states
+
+    def solve(x, data):
+        def moved(x):
+            args, _ = _inputs(x, data, model_doses)
+            return {k: args[k] for k in _REGIMEN if args[k] is not None}
+
+        args, _ = _inputs(x, data, model_doses)
+        # each direction is one entry of x moved in proportion to its value (so the
+        # derivatives are on one scale), divided back out below
+        size = jnp.where(x != 0, jnp.abs(x), 1.0)
+        dot = jax.vmap(lambda e: jax.jvp(moved, (x,), (e,))[1])(jnp.diag(size))
+        dot = {k: jnp.where(jnp.isfinite(d), d, 0.0) for k, d in dot.items()}  # padding: inf
+        out = run_program(**args, dot=dot)
+        ys = out["ys"]
+        S = ys[:, n:].reshape(ys.shape[0], p, n) / size[None, :, None]
+        # padded output times (+inf, never written: NaN) are cut off by the caller; their
+        # zero cotangents would still meet the NaNs in reverse mode (0 x NaN)
+        real = jnp.isfinite(data["t_out"])
+        S = jnp.where(real[:, None, None], S, 0.0)
+        y = jnp.where(real[:, None], ys[:, :n], ys[0, :n])  # (and the outputs read from them)
+        return y, S, out["status"]
+
+    @jax.custom_jvp
+    def states(x, data):
+        ys, _, status = solve(x, data)
+        return ys, status
+
+    @states.defjvp
+    def states_jvp(primals, tangents):
+        x, data = primals
+        ys, S, status = solve(x, data)
+        dys = jnp.einsum("tpn,p->tn", S, tangents[0])
+        return (ys, status), (dys, np.zeros(status.shape, dtype=jax.dtypes.float0))
+
+    def impl(x, data):
+        ys, status = states(x, data)
+        args, _ = _inputs(x, data, model_doses)  # theta with x's derivatives, for outputs
+        bad = jnp.where(status == OK, 0.0, jnp.nan)
+        ys = ys * jnp.where(status == OK, 1.0, jnp.nan) + bad * jnp.sum(x)
+        return outputs_of(args["theta"], ys, data["t_out"]), status
+
+    jitted = jax.jit(impl)
+    cm._lazy[key] = jitted
+    return jitted
+
+
 def _outputs_of(cm, outputs):
     """``outputs_of(theta, ys, t_out) -> {output: (T, ...)}``: the named outputs of a run's
     states at the output times."""
@@ -574,7 +666,7 @@ def _forward_program(cm, model_doses: bool, max_steps: int, outputs):
     return jitted
 
 
-def function(sim, scenario=None, *, wrt, derivatives: bool = True) -> Function:
+def function(sim, scenario=None, *, wrt, derivatives="auto") -> Function:
     """See ``function``."""
     return Function(sim, scenario, wrt=wrt, derivatives=derivatives)
 
