@@ -16,6 +16,7 @@ from . import plot  # noqa: E402  (matplotlib only when a plot is drawn)
 from .backends.scipy_backend import SolverError  # noqa: E402
 from .explore import BatchResult, Grid, PreRun, grid  # noqa: E402
 from .expr import FormulaError  # noqa: E402
+from .formula import formula  # noqa: E402
 from .functions import (  # noqa: E402
     abs,
     acos,
@@ -109,6 +110,7 @@ __all__ = [
     "factln",
     "factorial",
     "floor",
+    "formula",
     "FormulaError",
     "gamma",
     "gammaln",

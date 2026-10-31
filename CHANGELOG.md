@@ -12,6 +12,13 @@ versioning; `0.x` releases may change the API.
   name); memory stays small (a batch of 4 on a 61-state model with 12 names: 3.5 MB
   against 840 MB). `derivatives="reverse"` is the record and replay as before.
   `f.derivatives` says which a function uses.
+- `tq.formula(text)`: one formula in TenQSP's formula language, read and checked with the
+  same grammar, functions and messages as in a model. `f.names` lists the names it uses and
+  `f.jax(names)` is a JAX function of values for them (differentiable, `jit`, `vmap`). For
+  programs that write formulas outside a model, such as a fitting part.
+- A model text may continue with a fitting part: a line `fit` or `fit <name>` ends the model,
+  and `tq.load` and `tq.Model.from_text` read the model above it. One `.tq` file can then hold
+  a model and its fit.
 
 ### Changed
 - `sim.function`'s default is now `derivatives="auto"`: forward up to 40 names in `wrt`,

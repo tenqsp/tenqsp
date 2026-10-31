@@ -84,6 +84,26 @@ params= names ['zz'], which are not parameters of the model text.
 Every problem of a text is reported at once, as one `tq.NotationError` listing each problem
 with its line.
 
+**A fitting part after the model.** A line `fit` or `fit` *name* ends the model: TenQSP reads
+the statements above it and nothing from that line on. The rest of the file is a fitting part
+(data, estimated parameters, error models) for a fitting program such as tenqsp-fit to read,
+so one file serves both: `tq.load` gives the model to simulate, the fitting program the whole
+problem. `fit` followed by `=` is an ordinary named formula, not this line.
+
+```tq
+model theoph
+param ka=1.6, CL=0.04, ke=0.086
+d_t(depot) = -ka*depot
+d_t(centr) = ka*depot - ke*centr
+observable conc = centr*ke/CL
+
+fit theoph_pop          # TenQSP stops reading here
+...
+```
+
+!!! note "New in 0.7.0 (not yet released)"
+    With 0.6.1 from PyPI, a `fit` line is an unknown statement.
+
 ## Statements
 
 ### model

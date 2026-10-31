@@ -44,6 +44,8 @@ _OPENERS, _CLOSERS = "([{", ")]}"
 # a boundary condition under an equation, "at z=0: -D*d_z(C) = h*(C - Cb)" (IR 0.10)
 _AT_START = re.compile(rf"at\s+{_NAME}\s*=")
 _AT = re.compile(rf"at\s+({_NAME})\s*=\s*([^:]+?)\s*:\s*(.*)$", re.S)
+# "fit" or "fit <name>": the model ends, a fitting part follows (TenQSP 0.7.0)
+_FIT_LINE = re.compile(rf"fit(\s+{_NAME})?")
 
 
 class NotationError(ModelError):
@@ -492,6 +494,12 @@ class _Reader:
 
     def run(self) -> Model:
         statements = _statements(self.text)
+        # a line "fit" or "fit <name>" ends the model: what follows is a fitting part, for
+        # another program (tenqsp-fit) to read; TenQSP reads the model above it
+        for i, st in enumerate(statements):
+            if len(st.lines) == 1 and _FIT_LINE.fullmatch(st.first.strip()):
+                statements = statements[:i]
+                break
         kinds: dict[str, list[_Statement]] = {}
         # a condition "at z=0: …" belongs to the equation right above it (other conditions
         # of the same equation may come between)
