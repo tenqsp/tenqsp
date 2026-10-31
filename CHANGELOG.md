@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The project follows semantic
 versioning; `0.x` releases may change the API.
 
+## [Unreleased]
+
+### Changed
+- `sim.function` derivatives: the replay skips the unused room in its record in blocks
+  instead of step by step, forward and in reverse. Same results; a gradient of a small model
+  costs about half as much (one theophylline subject: 54 ms to 24 ms).
+
 ## [0.6.1] — 2026-10-31
 
 ### Added
