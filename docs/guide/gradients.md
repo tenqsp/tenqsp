@@ -171,6 +171,10 @@ model structure; after that, new values reuse the build.
 
 ## How the derivatives are computed
 
+!!! note "New in 0.7.0 (not yet released)"
+    `derivatives="forward"`, `"reverse"` and `"auto"` come with TenQSP 0.7.0. With 0.6.1
+    from PyPI, `sim.function` always records and replays (what `"reverse"` does here).
+
 `f` gets its derivatives in one of two ways, chosen by `derivatives=`:
 
 ```python
