@@ -181,3 +181,10 @@ tq.eq(n_doses, 3), tq.ne(a, b)   # == and != (Python's own == is kept)
 | `PHI(X)`, `GAMLN(X)`, `MOD(A,B)` | `normcdf(x)`, `gammaln(x)`, `rem(a,b)` | `normcdf(x)`, `gammaln(x)`, `rem(a,b)` |
 | `DADT(1) = -KA*A(1)` | `ddt_A = -ka*A` | `m.ode(A, -ka*A)` (`d/dt(A) = -ka*A` in PDE notation) |
 | transit compartments `DADT(2)=KTR*A(1)-KTR*A(2) ...` | same | an age axis with `scheme="erlang"` |
+
+## 8. Outside a model
+
+`tq.formula("CL_pop * (WT/70)^0.75")` reads one formula with this grammar and these
+functions without a model (TenQSP 0.7.0). Every name is then one value given by the caller:
+`f.names` lists them and `f.jax(["CL_pop", "WT"])` evaluates the formula as a JAX function.
+Shape functions, `grad`, `k[s]` and a field at one end need a model's axes and are refused.
