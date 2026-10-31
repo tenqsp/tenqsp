@@ -47,6 +47,7 @@ from tenqsp.compile import CompiledModel
 
 FIRST_CAPACITY = 1024  # steps (and segments) recorded at the first try
 EVENT_NUDGE = 1e-8  # relative: how far an event's state is moved back to read the slope
+BLOCK = 32  # record rows replayed (or skipped) together
 
 
 @dataclasses.dataclass
@@ -445,9 +446,29 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
         # checkpointed: reverse mode recomputes a step's Jacobian and LU rather than keeping
         # an n x n factor per step
         step = jax.checkpoint(body_or_skip)
+        B = min(BLOCK, S)  # S is a multiple of BLOCK (or smaller than it)
+
+        def block(c, xb):
+            """BLOCK rows of the record. A block past the run's last step is skipped whole
+            (under ``vmap``: past every member's), so unused room in the record costs one
+            test per block instead of a pass through every row, forward and in reverse."""
+
+            def skip(c, xb):
+                D, t = c[0], c[1]
+                return c, (
+                    jnp.broadcast_to(D, (B, *D.shape)),
+                    jnp.broadcast_to(t, (B,)),
+                    jnp.ones(B),
+                    xb[2],
+                )
+
+            return when(xb[0][0] < n_total, lambda c, xb: jax.lax.scan(step, c, xb), skip, c, xb)
+
         t0 = jnp.asarray(t0, dtype=jnp.float64)
         init = (D_init, t0, t0, z0, t0)
-        (_, _, _, z_final, _), (Ds, ts, hs, os) = jax.lax.scan(step, init, xs)
+        xs_b = jax.tree.map(lambda v: v.reshape(S // B, B, *v.shape[1:]), xs)
+        (_, _, _, z_final, _), out_b = jax.lax.scan(block, init, xs_b)
+        Ds, ts, hs, os = jax.tree.map(lambda v: v.reshape(S, *v.shape[2:]), out_b)
 
         def output(j):
             k = jnp.maximum(out_step[j], 0)

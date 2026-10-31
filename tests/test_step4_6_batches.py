@@ -268,7 +268,7 @@ def test_a_forward_only_function_needs_far_less_memory():
     names = list(m.compile().params.index)
     sim = m.simulator(outputs=["P"])
     sc = tq.Scenario(times=np.linspace(2, 24, 12))
-    f = sim.function(sc, wrt=names)
+    f = sim.function(sc, wrt=names, derivatives="reverse")
     g = sim.function(sc, wrt=names, derivatives=False)
     X = jnp.asarray(np.tile(f.x0, (4, 1)))
 

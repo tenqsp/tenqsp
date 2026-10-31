@@ -88,6 +88,12 @@ def pytest_addoption(parser):
         "model's JAX solve (<= GRADIENT_MAX_STATES states) against finite differences",
     )
     parser.addoption(
+        "--forward",
+        action="store_true",
+        help="with --gradients, check the forward sensitivities (sim.function(..., "
+        "derivatives='forward')) instead of the replay",
+    )
+    parser.addoption(
         "--tier",
         default="auto",
         choices=("auto", "sparse"),
@@ -238,13 +244,15 @@ GRADIENT_MAX_STATES = 200  # each check is a recorded run and four more solves
 GRADIENT_TOL = 1e-4  # relative to the outputs' size, as V8's finite-difference bound
 GRADIENT_STEP = 1e-4  # relative change of every parameter for the central differences
 _GRADIENT_SEEN: set = set()
+_GRADIENT_FORWARD = False  # --forward: check the forward sensitivities, not the replay
 
 
 def _check_gradient(cm, t_span, options):
     """V8 on every model (step 4.4d): the derivative of the run along a random direction of
     all parameters at once (each changed in proportion to its value), from the replay
-    (jax.jvp), against central differences of full solves, both at tight tolerances (rtol
-    1e-10, atol / 1e4). Once per distinct model and options.
+    (jax.jvp; with --forward, carried along the run as a forward sensitivity), against
+    central differences of full solves, both at tight tolerances (rtol 1e-10, atol / 1e4).
+    Once per distinct model and options.
 
     - Differences between solves are noisy (each run chooses its own steps): their error is
       estimated from two step sizes, and the derivative must agree within GRADIENT_TOL of
@@ -316,6 +324,7 @@ def _compare_gradient(cm, t_span, opts):
     import jax.numpy as jnp
     import numpy as np
 
+    from tenqsp.backends import jax_backend as jb
     from tenqsp.backends import jax_replay
     from tenqsp.backends.scipy_backend import SolverError
 
@@ -331,13 +340,32 @@ def _compare_gradient(cm, t_span, opts):
         direction[:p] = th[:p] * rng.choice([-1.0, 1.0], p) * rng.uniform(0.5, 1.0, p)
         if not np.any(direction):
             return "no parameter with a value other than 0"
-        rec = jax_replay.record(cm, t_span, theta=th, direction=direction, **o)
+        if _GRADIENT_FORWARD:  # the run carries the derivative along the direction
+            run = jb._prepare(
+                cm, t_span, o.get("times"), None, th, "BDF", o.get("rtol", 1e-6),
+                o.get("atol", 1e-6), o.get("max_step", np.inf), False, o.get("regimen"),
+                o.get("initial"),
+            )  # fmt: skip
+        else:
+            rec = jax_replay.record(cm, t_span, theta=th, direction=direction, **o)
     except ValueError:
         return "the run is refused"
-    _, tangent = jax.jvp(
-        lambda x: jax_replay.replay(cm, rec, x), (jnp.asarray(th),), (jnp.asarray(direction),)
-    )
-    G = np.asarray(tangent)
+    if _GRADIENT_FORWARD:
+        prog = jb._program(
+            cm, ledger=False, model_doses=run.model_doses,
+            max_steps=o.get("max_steps", 100_000), forward=1,
+        )  # fmt: skip
+        out = prog(**run.args, dot={"theta": jnp.asarray(direction)[None]})
+        if int(out["status"]) != 0:
+            raise SolverError(f"status {int(out['status'])}")
+        G = np.asarray(out["ys"])[: run.t_out.size, cm.n_states :]
+        y_run = np.asarray(out["ys"])[: run.t_out.size, : cm.n_states]
+    else:
+        _, tangent = jax.jvp(
+            lambda x: jax_replay.replay(cm, rec, x), (jnp.asarray(th),), (jnp.asarray(direction),)
+        )
+        G = np.asarray(tangent)
+        y_run = rec.ys
     h = GRADIENT_STEP
     try:
         ys = {
@@ -347,7 +375,7 @@ def _compare_gradient(cm, t_span, opts):
     except (SolverError, ValueError):
         return "a run with the parameters moved fails"
     fd = [(ys[1] - ys[-1]) / (2 * h), (ys[2] - ys[-2]) / (4 * h)]
-    size = np.max(np.abs(rec.ys)) + np.max(np.abs(fd[0]))
+    size = np.max(np.abs(y_run)) + np.max(np.abs(fd[0]))
     if not size > 0:
         return "outputs and their derivatives all 0"
     if not np.all(np.isfinite(G)):
@@ -357,8 +385,8 @@ def _compare_gradient(cm, t_span, opts):
     # at 2h). A large one is a kink whatever its ratio; a small one that still matters for
     # the comparison (above GRADIENT_TOL / 10) is a kink when it doubles rather than
     # quadruples (a switch time that the direction barely moves).
-    d1 = (ys[1] - rec.ys) - (rec.ys - ys[-1])
-    d2 = (ys[2] - rec.ys) - (rec.ys - ys[-2])
+    d1 = (ys[1] - y_run) - (y_run - ys[-1])
+    d2 = (ys[2] - y_run) - (y_run - ys[-2])
     doubles = np.abs(d2 - 2 * d1) < np.abs(d2 - 4 * d1)
     kink = (np.abs(d1) / h > 1e-2 * size) | ((np.abs(d1) / h > 0.1 * GRADIENT_TOL * size) & doubles)
     smooth = ~np.any(kink, axis=1)
@@ -429,6 +457,11 @@ def pytest_configure(config):
     for flag in ("--replay", "--gradients"):
         if config.getoption(flag) and config.getoption("--backend") != "jax":
             raise ValueError(f"{flag} needs --backend=jax")
+    if config.getoption("--forward"):
+        if not config.getoption("--gradients"):
+            raise ValueError("--forward needs --gradients")
+        global _GRADIENT_FORWARD
+        _GRADIENT_FORWARD = True
     if config.getoption("--tier") != "auto":
         if config.getoption("--backend") != "jax":
             raise ValueError("--tier needs --backend=jax")
@@ -552,7 +585,9 @@ def pytest_terminal_summary(terminalreporter, config):
         if config.getoption("--gradients"):
             left = "; ".join(f"{k} {why}" for why, k in sorted(_V9["gradient_skipped"].items()))
             terminalreporter.write_line(
-                f"Gradients (step 4.4d, V8): {_V9['gradients']} distinct runs agree with finite "
+                f"Gradients (step 4.4d, V8, "
+                f"{'forward sensitivities' if _GRADIENT_FORWARD else 'replay'}): "
+                f"{_V9['gradients']} distinct runs agree with finite "
                 f"differences (largest difference {_V9['gradient_worst']:.2g} of the outputs' "
                 f"size); {_V9['gradient_finer']} agree only with finer steps (the solution's "
                 f"steps too coarse for its derivative); not checked: {left or 'none'}"

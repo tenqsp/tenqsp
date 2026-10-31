@@ -283,7 +283,7 @@ class Simulator:
         )
         return SimResult(sol, self.outputs, sc)
 
-    def function(self, scenario: Scenario | None = None, *, wrt, derivatives: bool = True):
+    def function(self, scenario: Scenario | None = None, *, wrt, derivatives="auto"):
         """The simulation as a JAX function of the numbers named in ``wrt``, for estimation
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
@@ -292,7 +292,11 @@ class Simulator:
         ``"k"`` for every entry, ``"k[R]"``), or a number of the scenario's regimen, from 1
         in time order: ``"dose 1 amount"``, ``"dose 1 time"``, ``"infusion 1 rate"`` (or
         ``amount``, ``duration``, ``start``). Always uses the JAX solver; see
-        ``gradients``. ``derivatives=False``: for simulating (a population with
+        ``gradients``. ``derivatives=``: ``"auto"`` (the default: ``"forward"`` up to 40
+        names in ``wrt``, ``"reverse"`` above), ``"forward"`` (sensitivities carried along
+        the run; cost grows with the number of names) or ``"reverse"`` (the run recorded,
+        then replayed backwards; a gradient costs the same whatever the number of names);
+        ``f.derivatives`` says which. ``derivatives=False``: for simulating (a population with
         ``jax.vmap``, a sweep) without differentiating: no record of the runs, so much less
         memory and 2-3x faster; differentiating it raises."""
         from tenqsp.gradients import function
