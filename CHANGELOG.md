@@ -12,6 +12,13 @@ versioning; `0.x` releases may change the API.
   name); memory stays small (a batch of 4 on a 61-state model with 12 names: 3.5 MB
   against 840 MB). `derivatives="reverse"` is the record and replay as before.
   `f.derivatives` says which a function uses.
+- `sim.function([sc1, sc2, ...], wrt=...)`: several scenarios as one JAX function, for a
+  population. Each scenario keeps its own regimen, output times, start and starting state;
+  `fs(X)` takes one row of values per scenario and gives `{output: (scenarios, times, ...)}`,
+  NaN past each scenario's own times (`fs.t`, `fs.mask`, `fs.n_times`); `fs.status(X)` gives
+  one status per scenario. All run in one `jax.vmap` call of one build: the scenarios are
+  padded to the largest numbers of doses, infusions and output times with slots the solver
+  never reaches, so the padding is exact.
 - `tq.formula(text)`: one formula in TenQSP's formula language, read and checked with the
   same grammar, functions and messages as in a model. `f.names` lists the names it uses and
   `f.jax(names)` is a JAX function of values for them (differentiable, `jit`, `vmap`). For
