@@ -99,6 +99,22 @@ class Formula:
         self.text = text
         self.prec = prec
 
+    # ---------------------------------------------------------------- outside a model
+    @property
+    def names(self) -> tuple[str, ...]:
+        """The names this formula uses (not the functions it calls), sorted."""
+        from .formula import names_in
+
+        return names_in(self.text)
+
+    def jax(self, names):
+        """This formula as a JAX function of values for ``names``, given in that order,
+        e.g. ``tq.formula("a*exp(-k*t)").jax(["a", "k", "t"])(2.0, 0.1, ts)``. Every name the
+        formula uses must be listed; shape functions and axes belong in a model."""
+        from .formula import compile_free
+
+        return compile_free(self.text, names)
+
     # ---------------------------------------------------------------- display
     def __str__(self) -> str:
         return self.text

@@ -10,7 +10,7 @@ import tenqsp as tq
 | Page | What is there |
 |---|---|
 | [Building a model](model.md) | `tq.Model` and its methods; slices, conditions |
-| [Reading and writing text](text.md) | `tq.load`, `tq.table`, `tq.Model.from_text` |
+| [Reading and writing text](text.md) | `tq.load`, `tq.table`, `tq.Model.from_text`, `tq.formula` |
 | [Formula functions](functions.md) | `tq.exp`, `tq.sigmoid`, …; shapes `tq.normal`, `tq.point`, … |
 | [Regimens](regimens.md) | `tq.bolus`, `tq.infusion`, `tq.regimen_from_table`, `tq.regimens_from_table`, `tq.Regimen` |
 | [Simulation](simulation.md) | `tq.Scenario`, the simulator, results, grids, batches, pre-runs |
