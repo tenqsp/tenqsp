@@ -90,81 +90,27 @@ class Function:
     ``f.derivatives``: ``"forward"``, ``"reverse"`` or ``False``."""
 
     def __init__(self, sim, scenario=None, *, wrt: Sequence[str], derivatives="auto"):
-        from tenqsp.simulate import Scenario, _ModelDoses
+        from tenqsp.simulate import Scenario
 
-        if derivatives is True:  # the default before "auto" existed
-            derivatives = "auto"
-        if derivatives is not False and derivatives not in DERIVATIVES:
-            raise TypeError(
-                "derivatives= is 'auto' (the default), 'forward', 'reverse' or False, "
-                f"not {derivatives!r}."
-            )
+        derivatives = _derivatives_option(derivatives)
         sc = scenario if scenario is not None else Scenario()
         if not isinstance(sc, Scenario):
             raise TypeError(f"The first argument is a tq.Scenario, not {sc!r}.")
-        if sc.times is None:
-            raise ValueError("Give the output times in the scenario: times=[...].")
-        options = dict(sim.options)
-        options.pop("backend", None)  # derivatives always come from the JAX solver
-        options.pop("ledger", None)  # the ledger is not differentiated (design note §6)
-        if options.pop("method", "BDF") != "BDF":
-            raise ValueError("Derivatives come from the JAX BDF; the method must be 'BDF'.")
-        max_steps = options.pop("max_steps", 100_000)
+        cm, max_steps = _setup(sim)
+        run, regimen = _run_of(sim, cm, sc)
         self.scenario, self.outputs = sc, sim.outputs
         self.model = sim.model
-        cm = self._cm = sim.model.compile()
-        regimen = None if isinstance(sc.regimen, _ModelDoses) else sc.regimen
-        t0 = 0.0 if sc.start is None else sc.start
-        run = jb._prepare(
-            cm,
-            (t0, sc.times[-1]),
-            np.asarray(sc.times),
-            sc.params or None,
-            None,
-            "BDF",
-            options.get("rtol", 1e-6),
-            options.get("atol", 1e-6),
-            options.get("max_step", np.inf),
-            False,
-            regimen,
-            sc.initial_vector(cm),
-        )
+        self._cm = cm
         self.names, where = _resolve(cm, wrt, regimen)
         self._run, self._regimen = run, regimen
         self.x0 = _x0(run, where, regimen)
         self._data = _data(run, where, regimen)
         self._n_t = run.t_out.size
-        if derivatives == "auto":
-            derivatives = "forward" if len(self.names) <= FORWARD_MAX else "reverse"
-        self.derivatives = derivatives
-        if derivatives == "forward":  # sensitivities carried along the run: no record
-            probe = jb._program(cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps)
-            args, _ = _inputs(jnp.asarray(self.x0), self._data, run.model_doses)
-            jb._check(cm, probe(**args), run)  # a scenario that does not run is an error here
-            self.capacity = 0
-            p = len(self.names)
-            self._impl = _sens_program(cm, run.model_doses, max_steps, self.outputs, p)
-            return
-        if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
-            probe = jb._program(cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps)
-            args, _ = _inputs(jnp.asarray(self.x0), self._data, run.model_doses)
-            jb._check(cm, probe(**args), run)  # a scenario that does not run is an error here
-            self.capacity = 0
-            self._impl = _forward_program(cm, run.model_doses, max_steps, self.outputs)
-            return
-        # the run at the scenario's values (steered as f's) sets the room in the record
-        probe = jb._program(
-            cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps, steer=True
+        self.derivatives = _choose(derivatives, len(self.names))
+        need = _probe(cm, run, self._data, self.x0, self.derivatives, max_steps)
+        self._impl, self.capacity = _program_for(
+            cm, run.model_doses, self.derivatives, max_steps, self.outputs, len(self.names), need
         )
-        args, dot = _inputs(jnp.asarray(self.x0), self._data, run.model_doses)
-        out = probe(**args, dot=dot)
-        jb._check(cm, out, run)  # a scenario that does not run at all is an error here
-        need = max(int(out["n_steps"]), int(out["segments"]))
-        # only ever grows, so later scenarios of this shape share the build
-        room = record_room(cm.n_states)
-        self.capacity = max(jb.slots(room * need), cm._lazy.get("function_capacity", 0))
-        cm._lazy["function_capacity"] = self.capacity
-        self._impl = _function_program(cm, run.model_doses, self.capacity, max_steps, self.outputs)
 
     def __call__(self, x) -> dict[str, jax.Array]:
         out, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), self._data)
@@ -189,6 +135,218 @@ class Function:
 
     def __repr__(self) -> str:
         return f"<tq Function of {list(self.names)} -> {list(self.outputs)} at {self._n_t} times>"
+
+
+class FunctionBatch:
+    """The simulation of several scenarios as one JAX function: ``fs = sim.function([sc1,
+    sc2, ...], wrt=["CL", "V"])``, then ``fs(X)`` with ``X`` one row of values per scenario
+    (``fs.x0``: their values in the scenarios) -> ``{output: array (scenarios, times,
+    ...)}``. Each scenario keeps its own regimen, output times, start and starting state;
+    every one runs in one ``jax.vmap`` call of one build. The scenarios are padded to the
+    largest number of doses, infusions and output times among them with slots the solver
+    never reaches (at t = +inf), so the padding changes no value and no derivative. Each
+    scenario's outputs fill ``fs.n_times[i]`` times (``fs.t[i]``, ``fs.mask[i]``); the
+    rest of the row is NaN. ``fs.status(X)``: one ``"ok"`` or reason per scenario. The names
+    in ``wrt`` are those of ``sim.function``; a dose number must exist in every scenario."""
+
+    def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto"):
+        from tenqsp.simulate import Scenario
+
+        derivatives = _derivatives_option(derivatives)
+        scenarios = tuple(scenarios)
+        if not scenarios:
+            raise ValueError("Give at least one scenario.")
+        for sc in scenarios:
+            if not isinstance(sc, Scenario):
+                raise TypeError(f"Every scenario is a tq.Scenario, not {sc!r}.")
+        cm, max_steps = _setup(sim)
+        self.scenarios, self.outputs, self.model = scenarios, sim.outputs, sim.model
+        runs = [_run_of(sim, cm, sc) for sc in scenarios]
+        doses = {run.model_doses for run, _ in runs}
+        if len(doses) > 1:
+            raise ValueError(
+                "Some scenarios give a regimen and others use the model's own doses; give "
+                "every scenario a regimen (tq.Regimen() for none)."
+            )
+        names = None
+        resolved = []
+        for i, (_run, regimen) in enumerate(runs):
+            try:
+                n_i, where = _resolve(cm, wrt, regimen)
+            except ValueError as e:
+                raise ValueError(f"scenario {i + 1} ({_label(scenarios[i])}): {e}") from None
+            if names is not None and n_i != names:  # pragma: no cover - same wrt, same names
+                raise ValueError(f"scenario {i + 1}: wrt names {n_i}, the first {names}.")
+            names = n_i
+            resolved.append(where)
+        self.names = names
+        sizes = {k: max(run.args[k].shape[0] for run, _ in runs) for k in _PADDED}
+        for run, _ in runs:
+            _pad_run(run, sizes)
+        self.x0 = np.stack([_x0(run, w, reg) for (run, reg), w in zip(runs, resolved, strict=True)])
+        datas = [_data(run, w, reg) for (run, reg), w in zip(runs, resolved, strict=True)]
+        for i, d in enumerate(datas[1:], start=2):
+            same = jax.tree.map(lambda a, b: a.shape == b.shape, datas[0], d)
+            if not all(jax.tree.leaves(same)):
+                raise ValueError(
+                    f"scenario {i} ({_label(scenarios[i - 1])}) cannot share a build with the "
+                    "first: a dose named in wrt reaches a different number of cells. Make one "
+                    "function per kind of scenario."
+                )
+        self._data = jax.tree.map(lambda *a: jnp.stack(a), *datas)
+        self.derivatives = _choose(derivatives, len(names))
+        need = max(
+            _probe(cm, run, d, x0, self.derivatives, max_steps)
+            for (run, _), d, x0 in zip(runs, datas, self.x0, strict=True)
+        )
+        impl, self.capacity = _program_for(
+            cm, runs[0][0].model_doses, self.derivatives, max_steps, self.outputs, len(names), need
+        )
+        key = ("batch", impl)
+        if key not in cm._lazy:
+            cm._lazy[key] = jax.jit(jax.vmap(impl))
+        self._impl = cm._lazy[key]
+        self._cm = cm
+        self.n_times = np.array([run.t_out.size for run, _ in runs])
+        T = int(self.n_times.max())
+        self.mask = np.arange(T)[None, :] < self.n_times[:, None]
+        self.t = np.full((len(runs), T), np.nan)
+        for i, (run, _) in enumerate(runs):
+            self.t[i, : run.t_out.size] = run.t_out
+        self._T, self._mask = T, jnp.asarray(self.mask)
+
+    def __len__(self) -> int:
+        return len(self.scenarios)
+
+    def __call__(self, X) -> dict[str, jax.Array]:
+        out, _ = self._impl(self._x(X), self._data)
+        result = {}
+        for k, v in out.items():
+            v = v[:, : self._T]
+            m = self._mask.reshape(self._mask.shape + (1,) * (v.ndim - 2))
+            result[k] = jnp.where(m, v, jnp.nan)
+        return result
+
+    def status(self, X) -> tuple[str, ...]:
+        """``"ok"``, or why the run failed (its outputs are NaN), for each scenario."""
+        _, codes = self._impl(self._x(X), self._data)
+        return tuple(
+            "ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}")
+            for c in np.asarray(codes)
+        )
+
+    def _x(self, X):
+        X = jnp.asarray(X, dtype=jnp.float64)
+        if X.shape != self.x0.shape:
+            raise ValueError(
+                f"X has one row per scenario and one column per name: shape {self.x0.shape} "
+                f"({len(self)} scenarios; {list(self.names)}), not {X.shape}."
+            )
+        return X
+
+    def __repr__(self) -> str:
+        return (
+            f"<tq FunctionBatch of {list(self.names)} -> {list(self.outputs)}: "
+            f"{len(self)} scenarios, up to {self._T} times>"
+        )
+
+
+# padded across a batch (jax_backend._prepare's slot layout): name -> padding value
+_PADDED = ("t_out", "b_time", "b_index", "b_amount", "i_start", "i_stop", "i_index", "i_rate",
+           "sw_capacity")  # fmt: skip
+_PAD_VALUE = {"t_out": np.inf, "b_time": np.inf, "i_start": np.inf, "i_stop": np.inf}
+
+
+def _pad_run(run, sizes) -> None:
+    """Pad a run's slots to ``sizes`` (more slots of the kind the solver never reaches)."""
+    for k, n in sizes.items():
+        a = run.args[k]
+        if a is None or a.shape[0] == n:
+            continue
+        fill = jnp.full((n - a.shape[0], *a.shape[1:]), _PAD_VALUE.get(k, 0), dtype=a.dtype)
+        run.args[k] = jnp.concatenate([a, fill])
+
+
+def _label(sc) -> str:
+    return f"'{sc.name}'" if sc.name else "no name"
+
+
+def _derivatives_option(derivatives):
+    if derivatives is True:  # the default before "auto" existed
+        derivatives = "auto"
+    if derivatives is not False and derivatives not in DERIVATIVES:
+        raise TypeError(
+            "derivatives= is 'auto' (the default), 'forward', 'reverse' or False, "
+            f"not {derivatives!r}."
+        )
+    return derivatives
+
+
+def _choose(derivatives, n_names: int):
+    if derivatives == "auto":
+        return "forward" if n_names <= FORWARD_MAX else "reverse"
+    return derivatives
+
+
+def _setup(sim):
+    """The compiled model and the step limit; derivatives come from the JAX BDF."""
+    options = dict(sim.options)
+    if options.get("method", "BDF") != "BDF":
+        raise ValueError("Derivatives come from the JAX BDF; the method must be 'BDF'.")
+    return sim.model.compile(), options.get("max_steps", 100_000)
+
+
+def _run_of(sim, cm, sc):
+    """A scenario's inputs laid out in slots (``jax_backend._prepare``), and its regimen
+    (None: the model's own doses)."""
+    from tenqsp.simulate import _ModelDoses
+
+    if sc.times is None:
+        raise ValueError("Give the output times in the scenario: times=[...].")
+    options = sim.options
+    regimen = None if isinstance(sc.regimen, _ModelDoses) else sc.regimen
+    t0 = 0.0 if sc.start is None else sc.start
+    run = jb._prepare(
+        cm,
+        (t0, sc.times[-1]),
+        np.asarray(sc.times),
+        sc.params or None,
+        None,
+        "BDF",
+        options.get("rtol", 1e-6),
+        options.get("atol", 1e-6),
+        options.get("max_step", np.inf),
+        False,
+        regimen,
+        sc.initial_vector(cm),
+    )
+    return run, regimen
+
+
+def _probe(cm, run, data, x0, derivatives, max_steps) -> int:
+    """Run once at ``x0``: a scenario that does not run at all is an error here. Returns the
+    steps the run took (what sizes the record, for reverse derivatives)."""
+    steer = derivatives == "reverse"
+    probe = jb._program(
+        cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps, steer=steer
+    )
+    args, dot = _inputs(jnp.asarray(x0), data, run.model_doses)
+    out = probe(**args, dot=dot) if steer else probe(**args)
+    jb._check(cm, out, run)
+    return max(int(out["n_steps"]), int(out["segments"])) if steer else 0
+
+
+def _program_for(cm, model_doses, derivatives, max_steps, outputs, p: int, need: int):
+    """The jitted program and the record's capacity (0 without a record)."""
+    if derivatives == "forward":  # sensitivities carried along the run: no record
+        return _sens_program(cm, model_doses, max_steps, outputs, p), 0
+    if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
+        return _forward_program(cm, model_doses, max_steps, outputs), 0
+    # the run at the scenario's values (steered as f's) sets the room in the record; it
+    # only ever grows, so later scenarios of this shape share the build
+    capacity = max(jb.slots(record_room(cm.n_states) * need), cm._lazy.get("function_capacity", 0))
+    cm._lazy["function_capacity"] = capacity
+    return _function_program(cm, model_doses, capacity, max_steps, outputs), capacity
 
 
 class Sensitivity:
@@ -666,8 +824,10 @@ def _forward_program(cm, model_doses: bool, max_steps: int, outputs):
     return jitted
 
 
-def function(sim, scenario=None, *, wrt, derivatives="auto") -> Function:
+def function(sim, scenario=None, *, wrt, derivatives="auto") -> Function | FunctionBatch:
     """See ``function``."""
+    if isinstance(scenario, list | tuple):
+        return FunctionBatch(sim, scenario, wrt=wrt, derivatives=derivatives)
     return Function(sim, scenario, wrt=wrt, derivatives=derivatives)
 
 

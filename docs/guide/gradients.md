@@ -169,6 +169,52 @@ print(jax.grad(sse)(f.x0))             # d SSE / d (CL, V) at the start
 Building `f` and compiling `jax.grad` or `jax.jacfwd` of it take a few seconds each, once per
 model structure; after that, new values reuse the build.
 
+### Many scenarios at once
+
+!!! note "New in 0.7.0 (not yet released)"
+    `sim.function` with a list of scenarios comes with TenQSP 0.7.0.
+
+For a population (one scenario per subject, each with its own doses and sampling times),
+give `sim.function` a list of scenarios. The result is one JAX function of a table of
+values, one row per scenario, and every scenario runs in one `jax.vmap` call of one build:
+
+```python
+subjects = [
+    tq.Scenario(name="1", regimen=tq.bolus("A", 100, times=[0]), times=[0.5, 1, 2, 4, 8]),
+    tq.Scenario(name="2", regimen=tq.bolus("A", 80, times=[0, 12]), times=[1, 6, 12.5, 24]),
+    tq.Scenario(name="3", params={"V": 25}, regimen=tq.bolus("A", 120, times=[0]),
+                times=[2, 24]),
+]
+fs = sim.function(subjects, wrt=["CL", "V"])
+print(fs.x0)                 # [[ 4. 30.] [ 4. 30.] [ 4. 25.]]: each scenario's values
+Y = fs(fs.x0)["conc"]        # (3 scenarios, 5 times)
+print(fs.n_times)            # [5 4 2]: the rest of each row is NaN
+assert np.isclose(Y[1, 2], 80 / 30 * (np.exp(-4 / 30 * 12.5) + np.exp(-4 / 30 * 0.5)))
+assert np.isnan(Y[2, 2])
+```
+
+`fs.t` holds each scenario's times and `fs.mask` says which entries are real. An objective
+over all subjects masks the rest, and its gradient has one row per subject:
+
+```python
+obs = np.where(fs.mask, 1.0, np.nan)          # measurements, in the same layout
+
+def sse_all(X):
+    r = jnp.where(fs.mask, fs(X)["conc"] - obs, 0.0)
+    return jnp.sum(r**2)
+
+G = jax.grad(sse_all)(jnp.asarray(fs.x0))     # (3, 2): d SSE / d (CL, V) per subject
+print(fs.status(fs.x0))                       # ('ok', 'ok', 'ok')
+```
+
+The scenarios may differ in their number of doses, infusions and output times: each is
+padded to the largest among them with slots the solver never reaches (at t = +inf), so the
+padding changes no value and no derivative, and every list of scenarios of one model shares
+one build. Names in `wrt` are those of a single scenario's function; a dose number
+(`"dose 2 amount"`) must exist in every scenario. Results agree with each scenario's own
+function to within the solver's tolerance: running in one `jax.vmap` call rounds
+differently, which can move a solver step.
+
 ## How the derivatives are computed
 
 !!! note "New in 0.7.0 (not yet released)"
