@@ -190,3 +190,15 @@ def test_errors(sim):
     with pytest.raises(ValueError, match=r"X has one row per scenario"):
         fs(jnp.ones(2))
     assert "2 scenarios, up to 5 times" in repr(fs)
+
+
+def test_the_models_own_doses():
+    m = tq.Model.from_text(PK.replace("observable", "dose depot at t=0, 12: 100\nobservable"))
+    sim = m.simulator(outputs=["conc"], **TIGHT)
+    a, b = tq.Scenario(times=(1, 2, 4)), tq.Scenario(params={"ka": 2.0}, times=tuple(range(1, 20)))
+    fs = sim.function([a, b], wrt=["ka", "CL"])
+    Y = fs(fs.x0)["conc"]
+    np.testing.assert_allclose(Y[0, :3], closed(jnp.array([1.2, 4.0]), [(0.0, 100.0)], a.times),
+                               rtol=1e-7)  # fmt: skip
+    exact = closed(jnp.array([2.0, 4.0]), [(0.0, 100.0), (12.0, 100.0)], b.times)
+    np.testing.assert_allclose(Y[1], exact, rtol=1e-7)

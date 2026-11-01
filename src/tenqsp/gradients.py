@@ -180,7 +180,11 @@ class FunctionBatch:
             names = n_i
             resolved.append(where)
         self.names = names
-        sizes = {k: max(run.args[k].shape[0] for run, _ in runs) for k in _PADDED}
+        sizes = {  # b_amount is None with the model's own doses (amounts from its formulas)
+            k: max(run.args[k].shape[0] for run, _ in runs)
+            for k in _PADDED
+            if runs[0][0].args[k] is not None
+        }
         for run, _ in runs:
             _pad_run(run, sizes)
         self.x0 = np.stack([_x0(run, w, reg) for (run, reg), w in zip(runs, resolved, strict=True)])
