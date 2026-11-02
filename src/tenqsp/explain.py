@@ -682,10 +682,24 @@ def _transfers(M: _Model) -> list[str]:
             )
             continue
         dst = _label(tr.to, tr.to_where)
+
+        def free(name, where):
+            f = M.fields.get(name)
+            return [a for a in f.axes if a not in dict(where)] if f is not None else []
+
+        fs, ft = free(tr.source, tr.source_where), free(tr.to, tr.to_where)
+        summed = ""
+        if fs and len(fs) < len(ft) or ft and len(ft) < len(fs):
+            small, extra = (
+                (src, [a for a in ft if a not in fs])
+                if len(fs) < len(ft)
+                else (dst, [a for a in fs if a not in ft])
+            )
+            summed = f"; {small} gives or takes the sum over {', '.join(extra)}"
         out += _wrap(
             f"{src} -> {dst}: amount {tr.rate} x {tr.source} per time leaves {src} and arrives "
-            f"in {dst} (divided by each side's volume or weights); the ledger books it on both "
-            "sides, so it balances by construction.",
+            f"in {dst} (divided by each side's volume or weights){summed}; the ledger books it "
+            "on both sides, so it balances by construction.",
             "  ",
         )
     return out

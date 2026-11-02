@@ -216,7 +216,10 @@ d_t(Cart)                        = ... + J_out/V_art
 
 `flux name: from -> to = amount per time`. The two ends are compartments or slices of
 fields; inside the expression the field of a slice end (`C` above) means its value on that
-slice. A flux is an **amount per time**: in the equation of a concentration it is divided
+slice. Over the axes both ends leave free a flux goes element by element; an
+end with fewer free axes gives or takes the sum over the others. With two drugs the blood
+pools become fields per drug, `field Cart(drug) weights=Va`, and `flux J_art: Cart ->
+C[sub=vascular] = Q_art[organ]*Cart` still feeds every organ, each drug from its own pool. A flux is an **amount per time**: in the equation of a concentration it is divided
 by the volume, as in a paper; in the equation of an amount (or of cells in a field without
 weights) it is used as it is. Usually it is a rate times its source (`k*A`, `Vmax*A/(Km + A)`);
 a flux that does not read its source (zero order, `= k0`) may leave a place without a volume,

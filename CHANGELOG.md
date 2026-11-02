@@ -27,6 +27,17 @@ versioning; `0.x` releases may change the API.
   and `tq.load` and `tq.Model.from_text` read the model above it. One `.tq` file can then hold
   a model and its fit.
 
+### Fixed
+- A slice read in a formula that leaves some axes free, `C[sub=cellular]` with `organ` free,
+  is the field's value there, one per organ, as documented. It was refused as an integral
+  that is not an amount when the field's weights varied over a free axis (volumes per organ).
+- A flux may join ends whose free axes differ when one end's are all free at the other: a
+  blood pool per drug, `field Cart(drug)`, feeding `C[sub=vascular]` over drug and organ.
+  The flux goes element by element over the shared axes and the smaller end gives or takes
+  the sum over the others (`sum_organ(J_art)`), as a compartment already did. A whole-body
+  PBPK model with two drugs can then keep its fluxes and their balance check. Ends that share
+  no such order (`B(drug) -> C(organ)`) are still refused.
+
 ### Changed
 - `sim.function`'s default is now `derivatives="auto"`: forward up to 40 names in `wrt`,
   reverse above (`True`, the old default, means `"auto"`). Measured on the CPU, forward was

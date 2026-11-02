@@ -435,7 +435,11 @@ class _Checker:
 
     def check_integral_weights(self, spec, where: str) -> None:
         """An integral of weighted fields is an amount: their weights must agree and every
-        axis the weights vary over must be integrated over or fixed by the slice."""
+        axis the weights vary over must be integrated over or fixed by the slice. A slice read
+        in a formula adds up nothing (no axes to integrate over): it is the field's value on
+        the slice, one per element of the axes it leaves free, so no amount is needed."""
+        if not spec.over:
+            return
         try:
             expr = parse(spec.integrand, self.symbols)
         except FormulaError:
@@ -1464,12 +1468,16 @@ class _Checker:
                 continue
             if tr.to == tr.source and dict(tr.to_where) == dict(tr.source_where):
                 self.add("error", w, "the source and the destination are the same.")
-            if len(free) == 2 and free[0] and free[1] and free[0] != free[1]:
+            # element by element over the axes both ends leave free; an end with fewer free
+            # axes (a blood pool per species feeding every organ) gives or takes the sum
+            # over the others
+            if len(free) == 2 and not (free[0] <= free[1] or free[1] <= free[0]):
                 self.add(
                     "error",
                     w,
                     f"the two slices leave different axes free ({sorted(free[0])} and "
-                    f"{sorted(free[1])}); element by element they must match.",
+                    f"{sorted(free[1])}); one end's free axes must all be free at the other "
+                    "end too (element by element over those, summed over the rest).",
                 )
                 continue
             allowed = set().union(*free) if free else set()
