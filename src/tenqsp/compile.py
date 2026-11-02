@@ -1321,12 +1321,17 @@ class CompiledModel:
 
     def _deliver(self, name, where, amount, total, rates, sizes):
         """Add ``amount`` (frame, per element of the slice) to ``name``'s rate, as a change of
-        its value (divided by its weights or volume)."""
+        its value (divided by its weights or volume). An end without an axis the other end
+        leaves free (a blood pool per species feeding every organ) gets the sum along it."""
         axes = self.layout.axes.get(name, ())
         size = sizes.get(name, 1.0)
         if not axes:
             add = total / size
         else:
+            frame = self.plan.frame
+            others = tuple(frame.pos(a) for a in frame.axes if a not in axes)
+            if others:
+                amount = jnp.sum(amount, axis=others, keepdims=True)
             shape = self.layout.shapes[name]
             add = jnp.broadcast_to(self._on(amount, axes, "a transfer"), shape) / size
             mask = self._mask(name, where)

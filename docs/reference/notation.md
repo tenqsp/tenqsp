@@ -492,7 +492,10 @@ The last is the answer to `init A = 1`. Giving `B(0)` and `B[s=S](0)` together i
 **Syntax** `flux` *name*`:` *from* `->` *to* `=` *amount per time*
 
 **Meaning** Material leaving one place and arriving in another (blood flow, uptake). The two
-ends are compartments or slices of fields. Use the name with a minus in the equation of
+ends are compartments or slices of fields. Over the axes both ends leave free the flux goes
+element by element; an end with fewer free axes (a blood pool per drug, `Cart(drug)`, feeding
+`C[sub=vascular]` over drug and organ) gives or takes the sum over the others, so each of one
+end's free axes must also be free at the other. Use the name with a minus in the equation of
 *from* and with a plus in that of *to*, divided by the volume (or weights) where the place
 has one, summed (`sum_s(J)`) where the place has fewer axes. TenQSP checks that what leaves
 arrives. Anywhere else the name is an ordinary value. Fluxes are optional: the same term
@@ -1265,6 +1268,7 @@ line 2: d_t(A) = -k*(x > 1)*A
 | `flux J: A -> B` without `+J` in `B` | flux J arrives in B: d_t(B) needs exactly one term +J | add `+ J` |
 | a flux whose volumes do not match | divide it by B's volume, V2 (not V1) | divide by the place's own volume |
 | `flux J: P -> I` used as `-int_z(J)` | an arrow has exactly two ends that match element by element | the term in each equation, no `flux` |
+| `flux J: B -> C` with `B(drug)`, `C(organ)` | one end's free axes must all be free at the other end too | ends that share the axes, e.g. `C(drug, organ)` |
 | `at z=0: -2*Dz*d_z(D) = …` | the left side is the flux of D along z, from its equation | `-Dz*d_z(D) = …` |
 | `at z=0: …` with no equation above | a boundary condition belongs to an equation | write it under `d_t(D) = …` |
 | `at z=0: -Dz*d_z(D) = h*D^2` | not linear in D | terms proportional to `D` or free of it |

@@ -146,7 +146,9 @@ assert np.allclose(sol["amount"], 26 + 2*np.exp(-0.5*sol.t), rtol=1e-5)
 A **slice** `C[organ=liver]` is the field with some categorical axes fixed. Read in a
 formula, it is the field's **value** there, a concentration, not an amount: what a drug
 effect in the liver should be driven by. With several axes, `C[organ=liver, sub=cellular]`
-fixes both, and a slice that fixes only some axes still varies over the others.
+fixes both, and a slice that fixes only some axes still varies over the others: in a
+PBPK model `C[sub=cellular]` is the cellular concentration of every organ, one value per
+organ, also where the volumes differ between organs.
 
 ```tq
 model liver_effect
