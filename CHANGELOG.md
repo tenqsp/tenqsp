@@ -42,6 +42,15 @@ versioning; `0.x` releases may change the API.
   the sum over the others (`sum_organ(J_art)`), as a compartment already did. A whole-body
   PBPK model with two drugs can then keep its fluxes and their balance check. Ends that share
   no such order (`B(drug) -> C(organ)`) are still refused.
+- Second derivatives of a function from `sim.function` (`jax.hessian`, or `jax.jacfwd` or
+  `jax.jacrev` of `jax.grad`). With `derivatives="reverse"` they were wrong, with no
+  warning; with `"forward"`, `jax.hessian` failed with an error from inside the solver.
+  Both are now right (checked against central differences of the gradient, with dose
+  amounts and times and an infusion's rate, start and duration among the inputs). Where a
+  second derivative is not available, a plain error says so and what to do instead:
+  models with extinction groups or switches (an event's time has an exact first
+  derivative only), `jax.jacrev(jax.grad(f))` with forward derivatives (use `jax.hessian`),
+  and large models on the sparse tier with forward derivatives (use `"reverse"`).
 
 ### Changed
 - `sim.function`'s default is now `derivatives="auto"`: forward up to 40 names in `wrt`,

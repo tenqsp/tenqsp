@@ -290,6 +290,26 @@ Forward derivatives keep no record, so they have no such limit.
 ([Simulation and exploration](simulation.md)) starts from a fixed state: the derivatives do
 not flow back through the pre-run.
 
+**Second derivatives.** `jax.hessian(loss)`, where `loss` is a number made from `f`'s
+outputs, gives the matrix of its second derivatives (for standard errors, or a
+Newton-type method):
+
+```python
+loss = lambda x: jnp.sum(f(x)["conc"] ** 2)
+H = jax.hessian(loss)(f.x0)
+```
+
+It works with both kinds of derivatives, with these limits; each raises an error that says
+so:
+
+- **models with extinction groups or switches**: not available. The derivative of an
+  event's time is exact to first order only, so a second derivative through it would be
+  slightly wrong. Take central differences of `jax.grad(loss)` instead.
+- **forward derivatives**: differentiate the gradient forward, with `jax.hessian` or
+  `jax.jacfwd(jax.grad(loss))`, not `jax.jacrev(jax.grad(loss))`.
+- **large models** (those solved with sparse linear algebra): only with
+  `derivatives="reverse"`.
+
 ## Simulating populations: `derivatives=False`
 
 For a virtual population, a sweep or anything else that only needs the outputs, make the
