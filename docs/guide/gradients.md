@@ -135,6 +135,18 @@ X = jnp.array([[3.0, 30.0], [4.0, 30.0], [5.0, 30.0]])
 Y = jax.vmap(f)(X)["conc"]             # (3, 7): one row per parameter set
 ```
 
+**Other tolerances for one call.** `f` runs at the simulator's `rtol` and `atol`. To check that
+they are tight enough, run the same function at tighter ones: `f(x, rtol=..., atol=...)`
+(keyword only; `atol` is one number or one per state). The tolerances are inputs of the
+compiled program, so this needs no new build and no new compile, and the numbers are those of
+a simulator built at those tolerances. `f.status` and a function of several scenarios take
+them too.
+
+```python
+y_tight = f(f.x0, rtol=1e-10, atol=1e-12)["conc"]
+print(np.max(np.abs(f(f.x0)["conc"] - y_tight)))  # what the simulator's tolerances cost
+```
+
 ### A small fit
 
 Synthetic data from `CL = 5`, `V = 25`, fitted from the scenario's values with
@@ -268,10 +280,11 @@ print(f.status(f.x0))                  # ok
 ```
 
 **The record has room** (reverse only) for 4 times the steps of the run at `f.x0` (2 times on
-models above 2,000 states, to halve the memory a gradient needs there). An `x` that needs more
-gives NaN,
-with the status "too many steps for the record (make a new sim.function(...) at this x)":
-build a new function at values closer to the ones you need.
+models above 2,000 states, to halve the memory a gradient needs there). An `x`, or a much tighter
+`rtol` given to one call, that needs more gives NaN, with the status "too many steps for the
+record (make a new sim.function(...) at this x, or at this tolerance; ...)": build a new
+function at values closer to the ones you need, or from a simulator at that tolerance.
+Forward derivatives keep no record, so they have no such limit.
 
 **Pre-runs are fixed.** A scenario that starts from a pre-run
 ([Simulation and exploration](simulation.md)) starts from a fixed state: the derivatives do

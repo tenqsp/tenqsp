@@ -76,7 +76,10 @@ _STATUS = {
     "duration",
     jb.SWITCH_CAPACITY: "more switch times than at the scenario's values (make a new "
     "sim.function(...) at this x)",
-    RECORD_FULL: "too many steps for the record (make a new sim.function(...) at this x)",
+    RECORD_FULL: (
+        "too many steps for the record (make a new sim.function(...) at this x, or at this "
+        "tolerance; derivatives='forward' keeps no record)"
+    ),
 }
 _DOSE = re.compile(r"dose\s+(\d+)\s+(amount|time)")
 _INFUSION = re.compile(r"infusion\s+(\d+)\s+(rate|amount|duration|start)")
@@ -87,7 +90,11 @@ class Function:
     docstring). ``f.names``: what each entry of ``x`` is; ``f.x0``: their values in the
     scenario; ``f(x)``: ``{output: array (n_t, ...)}``; ``f.unpack(x)``: ``x`` by name;
     ``f.status(x)``: ``"ok"`` or why the run at ``x`` failed (outputs NaN);
-    ``f.derivatives``: ``"forward"``, ``"reverse"`` or ``False``."""
+    ``f.derivatives``: ``"forward"``, ``"reverse"`` or ``False``.
+
+    ``f(x, rtol=..., atol=...)`` runs that call at other tolerances than the simulator's
+    (for checking that the tolerance is tight enough), with no new build or compile; see
+    ``_tolerances``."""
 
     def __init__(self, sim, scenario=None, *, wrt: Sequence[str], derivatives="auto"):
         from tenqsp.simulate import Scenario
@@ -112,13 +119,15 @@ class Function:
             cm, run.model_doses, self.derivatives, max_steps, self.outputs, len(self.names), need
         )
 
-    def __call__(self, x) -> dict[str, jax.Array]:
-        out, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), self._data)
+    def __call__(self, x, *, rtol=None, atol=None) -> dict[str, jax.Array]:
+        data = _tolerances(self._data, rtol, atol)
+        out, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         return {k: v[: self._n_t] for k, v in out.items()}
 
-    def status(self, x) -> str:
+    def status(self, x, *, rtol=None, atol=None) -> str:
         """``"ok"``, or why the run at ``x`` failed (its outputs are NaN)."""
-        _, code = self._impl(jnp.asarray(x, dtype=jnp.float64), self._data)
+        data = _tolerances(self._data, rtol, atol)
+        _, code = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         code = int(code)
         return "ok" if code == OK else _STATUS.get(code, f"status {code}")
 
@@ -147,7 +156,8 @@ class FunctionBatch:
     never reaches (at t = +inf), so the padding changes no value and no derivative. Each
     scenario's outputs fill ``fs.n_times[i]`` times (``fs.t[i]``, ``fs.mask[i]``); the
     rest of the row is NaN. ``fs.status(X)``: one ``"ok"`` or reason per scenario. The names
-    in ``wrt`` are those of ``sim.function``; a dose number must exist in every scenario."""
+    in ``wrt`` are those of ``sim.function``; a dose number must exist in every scenario.
+    ``fs(X, rtol=..., atol=...)``: other tolerances for this call, as for ``sim.function``."""
 
     def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto"):
         from tenqsp.simulate import Scenario
@@ -222,8 +232,8 @@ class FunctionBatch:
     def __len__(self) -> int:
         return len(self.scenarios)
 
-    def __call__(self, X) -> dict[str, jax.Array]:
-        out, _ = self._impl(self._x(X), self._data)
+    def __call__(self, X, *, rtol=None, atol=None) -> dict[str, jax.Array]:
+        out, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
         result = {}
         for k, v in out.items():
             v = v[:, : self._T]
@@ -231,9 +241,9 @@ class FunctionBatch:
             result[k] = jnp.where(m, v, jnp.nan)
         return result
 
-    def status(self, X) -> tuple[str, ...]:
+    def status(self, X, *, rtol=None, atol=None) -> tuple[str, ...]:
         """``"ok"``, or why the run failed (its outputs are NaN), for each scenario."""
-        _, codes = self._impl(self._x(X), self._data)
+        _, codes = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
         return tuple(
             "ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}")
             for c in np.asarray(codes)
@@ -524,6 +534,39 @@ def _x0(run, where, regimen) -> np.ndarray:
             values = {"rate": f.rate, "amount": f.amount, "duration": f.duration, "start": f.start}
             out.append(values[w[2]])
     return np.asarray(out, dtype=np.float64)
+
+
+def _tolerances(data, rtol, atol) -> dict:
+    """``data`` with the tolerances of one call (None: the simulator's). The tolerances are
+    inputs of the compiled program, so a new value reruns it without a new compile. ``rtol``
+    is one positive number; ``atol`` one, or one per state. With ``derivatives="reverse"``
+    the record's room was sized at the simulator's tolerances: a much tighter ``rtol`` can
+    need more steps than it holds, and that run gives NaN with the status "record full"."""
+    if rtol is None and atol is None:
+        return data
+    data = dict(data)
+    if rtol is not None:
+        r = _positive(rtol, "rtol")
+        data["rtol"] = jnp.broadcast_to(r, data["rtol"].shape)
+    if atol is not None:
+        a = _positive(atol, "atol")
+        n = data["atol"].shape[-1]
+        if a.ndim > 1 or a.size not in (1, n):
+            raise ValueError(f"atol must be a positive number or {n} positive numbers (one per "
+                             "state).")  # fmt: skip
+        data["atol"] = jnp.broadcast_to(a, data["atol"].shape)
+    return data
+
+
+def _positive(v, what: str) -> jax.Array:
+    a = jnp.asarray(v, dtype=jnp.float64)
+    try:
+        ok = bool(jnp.all(a > 0) & jnp.all(jnp.isfinite(a)))
+    except jax.errors.ConcretizationTypeError:  # a traced value (inside jit): not checked
+        return a
+    if not ok:
+        raise ValueError(f"{what} must be positive and finite, got {v!r}.")
+    return a
 
 
 def _data(run, where, regimen) -> dict:

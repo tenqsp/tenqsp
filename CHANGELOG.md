@@ -19,6 +19,11 @@ versioning; `0.x` releases may change the API.
   one status per scenario. All run in one `jax.vmap` call of one build: the scenarios are
   padded to the largest numbers of doses, infusions and output times with slots the solver
   never reaches, so the padding is exact.
+- `f(x, rtol=..., atol=...)` for a function from `sim.function` (and for `f.status` and a
+  function of several scenarios): one call at other tolerances than the simulator's, with no
+  new build or compile (the tolerances were already inputs of the compiled program). For
+  checking that a tolerance is tight enough. With `derivatives="reverse"`, a much tighter
+  tolerance can need more steps than the record holds: NaN, with that status.
 - `tq.formula(text)`: one formula in TenQSP's formula language, read and checked with the
   same grammar, functions and messages as in a model. `f.names` lists the names it uses and
   `f.jax(names)` is a JAX function of values for them (differentiable, `jit`, `vmap`). For
