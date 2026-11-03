@@ -48,7 +48,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from tenqsp.backends import jax_backend as jb
-from tenqsp.backends import jax_replay
+from tenqsp.backends import jax_order, jax_replay
 from tenqsp.backends.jax_bdf import OK, STATUS_TEXT
 
 DERIVATIVES = ("auto", "forward", "reverse")
@@ -745,6 +745,17 @@ def _function_program(cm, model_doses: bool, capacity: int, max_steps: int, outp
     return jitted
 
 
+_FORWARD_SECOND = (
+    "This function takes its derivatives forward (derivatives='forward', or 'auto' with few "
+    "inputs): its gradient can be differentiated "
+    "forward (jax.hessian, or jax.jacfwd(jax.grad(f))) but not in reverse "
+    "(jax.jacrev(jax.grad(f))). Use one of those, or make it with derivatives='reverse'."
+)
+_SPARSE_SECOND = (
+    "Second derivatives of a large model (solved with sparse linear algebra) need "
+    "derivatives='reverse': in forward mode its sparse linear solves cannot be differentiated "
+    "again. Make the function with sim.function(..., derivatives='reverse')."
+)
 _REGIMEN = ("theta", "b_time", "b_amount", "i_start", "i_stop", "i_rate")
 
 
@@ -792,7 +803,14 @@ def _sens_program(cm, model_doses: bool, max_steps: int, outputs, p: int):
     @states.defjvp
     def states_jvp(primals, tangents):
         x, data = primals
+        # a second derivative differentiates the sensitivity run: forward only (a while
+        # loop), and not at all through events or the sparse tier's linear solves
+        if cm.extinction_groups or cm.switch_events:
+            x = jax_order.refuse(x, jax_order.THROUGH_EVENTS)
+        elif jb.tier(cm) == "sparse":
+            x = jax_order.refuse(x, _SPARSE_SECOND)
         ys, S, status = solve(x, data)
+        S = jax_order.forward_only(S, _FORWARD_SECOND)
         dys = jnp.einsum("tpn,p->tn", S, tangents[0])
         return (ys, status), (dys, np.zeros(status.shape, dtype=jax.dtypes.float0))
 

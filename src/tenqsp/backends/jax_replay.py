@@ -41,7 +41,7 @@ import jax.scipy.linalg as jsl
 import numpy as np
 
 from tenqsp.backends import jax_backend as jb
-from tenqsp.backends import jax_sparse
+from tenqsp.backends import jax_order, jax_sparse
 from tenqsp.backends.jax_bdf import _ALPHA, MAX_ORDER, _change_D, dense, predict, update, when
 from tenqsp.compile import CompiledModel
 
@@ -271,6 +271,9 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
         @correction.defjvp
         def correction_jvp(primals, tangents):
             d, t_new, y_predict, psi, cc, th, u = primals
+            # d through correction itself: a second derivative then sees d move with the
+            # inputs (the recorded d alone is a constant; its value is the same)
+            d = correction(d, t_new, y_predict, psi, cc, th, u)
 
             def G(t_new, y_predict, psi, cc, th, u):
                 return cc * (cm._rhs_impl(t_new, y_predict + d, th, geom) + u) - psi - d
@@ -365,6 +368,8 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
                 rate = jax.lax.stop_gradient(rate)
                 g_now = event_value(ev, tau, y_tau, th)
                 shift = -g_now / jnp.where(rate == 0, 1.0, rate)
+                # right to first order (rate and slope are held): a second derivative raises
+                shift = jax_order.first_order_only(shift, jax_order.THROUGH_EVENTS)
                 e_event = tau + (shift - jax.lax.stop_gradient(shift))
                 y_event = y_tau + slope * (e_event - tau)
                 e = jnp.where(at_event, e_event, e_bound)

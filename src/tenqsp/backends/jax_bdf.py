@@ -457,7 +457,9 @@ def bdf(
 
     def body(c: _Carry) -> _Carry:
         # ---- the start of a step: clamp h to [min_step, max_step] (scipy _step_impl)
-        min_step = 10 * jnp.abs(jnp.nextafter(c.t, jnp.inf) - c.t)
+        # (the floor does not depend on the parameters; nextafter has no derivative rule)
+        t_sg = jax.lax.stop_gradient(c.t)
+        min_step = 10 * jnp.abs(jnp.nextafter(t_sg, jnp.inf) - t_sg)
         too_big = c.h_abs > max_step
         too_small = c.h_abs < min_step
         clamp = c.new_step & (too_big | too_small)
