@@ -28,6 +28,11 @@ versioning; `0.x` releases may change the API.
   same grammar, functions and messages as in a model. `f.names` lists the names it uses and
   `f.jax(names)` is a JAX function of values for them (differentiable, `jit`, `vmap`). For
   programs that write formulas outside a model, such as a fitting part.
+- `f.steps(x)` for a function from `sim.function`: the most solver steps that the run of
+  `f(x)` takes between two doses or events, the number the simulator's `max_steps` limits
+  (`fs.steps(X)`: one per scenario). So that a program calling `f` at an optimizer's
+  values can set `max_steps` from the work at reasonable values, and a run at an extreme
+  value fails quickly instead of taking minutes.
 - A model text may continue with a fitting part: a line `fit` or `fit <name>` ends the model,
   and `tq.load` and `tq.Model.from_text` read the model above it. One `.tq` file can then hold
   a model and its fit.

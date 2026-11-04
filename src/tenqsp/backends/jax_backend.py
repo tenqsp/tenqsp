@@ -823,6 +823,7 @@ def _program(
                 "njev": s["njev"] + r.njev,
                 "nlu": s["nlu"] + r.nlu,
                 "segments": s["segments"] + 1,
+                "most_steps": jnp.maximum(s["most_steps"], r.n_steps),
                 **extra,
                 **({"zs": zs_end} if carry else {}),
             }
@@ -856,6 +857,7 @@ def _program(
             "njev": zero,
             "nlu": zero,
             "segments": zero,
+            "most_steps": zero,  # the most steps in one segment (max_steps is per segment)
         }
         if carry:  # the start: the initial values, then any doses at t0
             th_0, u_0, _ = segment_inputs(t0, state["armed"])
