@@ -51,6 +51,12 @@ versioning; `0.x` releases may change the API.
   models with extinction groups or switches (an event's time has an exact first
   derivative only), `jax.jacrev(jax.grad(f))` with forward derivatives (use `jax.hessian`),
   and large models on the sparse tier with forward derivatives (use `"reverse"`).
+- The JAX solver could run for hours, or never end, when the first step from t = 0 kept
+  failing (values far outside a model's range, such as an optimizer's trial point with a
+  rate constant of 1e133). The smallest step there is a number so small that the CPU treats
+  it as zero, so the step was halved to 0 and the "step too small" test never fired. The
+  run now ends at once with that status (NaN from `sim.function`, an error from
+  `simulate`), as the scipy backend does.
 
 ### Changed
 - `sim.function`'s default is now `derivatives="auto"`: forward up to 40 names in `wrt`,
