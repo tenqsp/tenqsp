@@ -43,7 +43,7 @@ PK_CASES = {
 }
 
 DIFFUSION = """model spread
-axis x in [0, 1] n=300
+axis x in [0, 1] n=40
 param D=0.01, k=0.3
 field u(x)
 d_t(u) = d_x(D*d_x(u)) - k*u
@@ -110,7 +110,11 @@ def test_doses_and_an_infusion_forward(case):
         REVERSE(loss_of(f, "conc"))(jnp.asarray(f.x0))
 
 
-def sparse_function(derivatives):
+def sparse_function(derivatives, monkeypatch):
+    # a small model put on the sparse tier (the threshold lowered): at its usual size
+    # (300 cells) the reverse check took ~40 s on a workstation and over 120 s on a CI runner
+    monkeypatch.setattr(jb, "SPARSE_FROM_STATES", 0)
+    monkeypatch.setattr(jb, "SPARSE_FROM_STATES_GPU", 0)
     m = tq.Model.from_text(DIFFUSION)
     assert jb.tier(m.compile()) == "sparse"
     return m.simulator(outputs=["left"], **TIGHT).function(
@@ -118,14 +122,15 @@ def sparse_function(derivatives):
     )
 
 
-def test_a_model_on_the_sparse_tier_reverse():
-    f = sparse_function("reverse")
-    check(f, f.x0, "left", rtol=1e-5)
+def test_a_model_on_the_sparse_tier_reverse(monkeypatch):
+    f = sparse_function("reverse", monkeypatch)
+    # jax.hessian only: each form is a compile of its own, and the forms are checked above
+    check(f, f.x0, "left", rtol=1e-5, seconds=(jax.hessian,))
 
 
 @pytest.mark.parametrize("second", [jax.hessian, FORWARD, REVERSE], ids=["hessian", "fwd", "rev"])
-def test_a_model_on_the_sparse_tier_forward_refuses(second):
-    f = sparse_function("forward")
+def test_a_model_on_the_sparse_tier_forward_refuses(second, monkeypatch):
+    f = sparse_function("forward", monkeypatch)
     jax.grad(loss_of(f, "left"))(jnp.asarray(f.x0))  # the gradient itself is fine
     with pytest.raises(ValueError, match="sparse linear algebra.*derivatives='reverse'"):
         second(loss_of(f, "left"))(jnp.asarray(f.x0))

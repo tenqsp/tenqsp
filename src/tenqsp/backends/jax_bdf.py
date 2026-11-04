@@ -52,6 +52,7 @@ NEWTON_MAXITER = 4
 MIN_FACTOR = 0.2
 MAX_FACTOR = 10.0
 EPS = float(np.finfo(np.float64).eps)
+TINY = float(np.finfo(np.float64).tiny)  # the smallest normal number
 FIRST_STEP_FLOOR = 1e-8  # as the scipy backend: relative to the span (V14)
 
 _KAPPA = np.array([0, -0.1850, -1 / 9, -0.0823, -0.0415, 0])
@@ -457,9 +458,11 @@ def bdf(
 
     def body(c: _Carry) -> _Carry:
         # ---- the start of a step: clamp h to [min_step, max_step] (scipy _step_impl)
-        # (the floor does not depend on the parameters; nextafter has no derivative rule)
+        # (the floor does not depend on the parameters; nextafter has no derivative rule).
+        # At t = 0 scipy's floor is a subnormal number, which XLA on CPU flushes to zero: a
+        # step that keeps failing would then be halved to 0 and tried forever.
         t_sg = jax.lax.stop_gradient(c.t)
-        min_step = 10 * jnp.abs(jnp.nextafter(t_sg, jnp.inf) - t_sg)
+        min_step = jnp.maximum(10 * jnp.abs(jnp.nextafter(t_sg, jnp.inf) - t_sg), 10 * TINY)
         too_big = c.h_abs > max_step
         too_small = c.h_abs < min_step
         clamp = c.new_step & (too_big | too_small)

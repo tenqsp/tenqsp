@@ -150,6 +150,19 @@ def test_a_failing_run_reports_its_status_instead_of_hanging():
     assert np.isnan(np.asarray(r.ys)[1, 0])  # never reached
 
 
+def test_a_step_that_fails_at_t0_ends_the_run():
+    """At t = 0 scipy's smallest step is a subnormal number, which XLA on CPU flushes to zero.
+    Here every normal step size overshoots zero and Newton fails: the step is halved until it
+    is too small, and the run ends there (it used to reach 0 and take zero-length steps, or
+    retry one forever)."""
+    fun = lambda t, y: -1e300 * jnp.sign(y)  # noqa: E731
+    jac = lambda t, y: jnp.zeros((1, 1))  # noqa: E731
+    r = bdf(fun, jac, 0.0, 1.0, jnp.array([1e-10]), jnp.array([1.0]), rtol=1e-6, atol=1e-30,
+            h0=1e-3)  # fmt: skip
+    assert int(r.status) == TOO_SMALL_STEP
+    assert int(r.n_steps) == 0
+
+
 def test_an_event_stops_the_run_at_the_crossing():
     """y' = -y from 1, watching y - 0.5 downward: it stops at ln 2 with y = 0.5; outputs at
     and after the event are left unwritten."""
