@@ -83,7 +83,7 @@ def test_a_dose_into_one_element_of_a_weighted_field():
 
 
 def test_slots_one_build_per_power_of_two(pk):
-    program = jax_backend._program(pk.compile(), ledger=True, model_doses=False, max_steps=100_000)
+    program = jax_backend._program(pk.compile(), ledger=True, model_doses=False)
     before = program._cache_size()
     for k in range(1, 9):  # 1..8 doses, 3..8 output times: all in 8 slots
         reg = tq.bolus("depot", 10.0 * k, times=np.linspace(0, 20, k))

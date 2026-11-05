@@ -384,7 +384,7 @@ def _run_jax(sim, scenarios, indices) -> list[dict]:
             f = sim.function(template, wrt=names, derivatives=False)
             X = np.array([_wrt_and_x(scenarios[i])[1] for i in members])
             batch_f = jax.jit(jax.vmap(lambda x, f=f: f._impl(x, f._data)))  # outputs, status
-            outs, status = batch_f(jnp.asarray(X))
+            outs, status, _ = batch_f(jnp.asarray(X))
             outs = {o: v[:, : f._n_t] for o, v in outs.items()}
         except (ValueError, KeyError, TypeError, SolverError):
             # not one vmap call (nothing varies, a list-valued parameter, a template that

@@ -344,17 +344,14 @@ def _compare_gradient(cm, t_span, opts):
             run = jb._prepare(
                 cm, t_span, o.get("times"), None, th, "BDF", o.get("rtol", 1e-6),
                 o.get("atol", 1e-6), o.get("max_step", np.inf), False, o.get("regimen"),
-                o.get("initial"),
+                o.get("initial"), max_steps=o.get("max_steps", 100_000),
             )  # fmt: skip
         else:
             rec = jax_replay.record(cm, t_span, theta=th, direction=direction, **o)
     except ValueError:
         return "the run is refused"
     if _GRADIENT_FORWARD:
-        prog = jb._program(
-            cm, ledger=False, model_doses=run.model_doses,
-            max_steps=o.get("max_steps", 100_000), forward=1,
-        )  # fmt: skip
+        prog = jb._program(cm, ledger=False, model_doses=run.model_doses, forward=1)
         out = prog(**run.args, dot={"theta": jnp.asarray(direction)[None]})
         if int(out["status"]) != 0:
             raise SolverError(f"status {int(out['status'])}")

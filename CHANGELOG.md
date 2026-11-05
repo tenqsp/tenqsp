@@ -71,6 +71,9 @@ versioning; `0.x` releases may change the API.
   to 32 ms per gradient. Results agree with reverse to the solver's tolerance. A function
   made by `"auto"` keeps no record, so the status "too many steps for the record" no longer
   occurs with it.
+- The JAX solver's step limit (`max_steps`) is an input of its compiled programs, like the
+  tolerances: simulators that differ only in `max_steps` share every build, with no new
+  compile.
 - `sim.function` derivatives: the replay skips the unused room in its record in blocks
   instead of step by step, forward and in reverse. Same results; a gradient of a small model
   costs about half as much (one theophylline subject: 54 ms to 24 ms).

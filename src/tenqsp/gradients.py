@@ -104,7 +104,7 @@ class Function:
         sc = scenario if scenario is not None else Scenario()
         if not isinstance(sc, Scenario):
             raise TypeError(f"The first argument is a tq.Scenario, not {sc!r}.")
-        cm, max_steps = _setup(sim)
+        cm = _setup(sim)
         run, regimen = _run_of(sim, cm, sc)
         self.scenario, self.outputs = sc, sim.outputs
         self.model = sim.model
@@ -115,21 +115,20 @@ class Function:
         self._data = _data(run, where, regimen)
         self._n_t = run.t_out.size
         self.derivatives = _choose(derivatives, len(self.names))
-        need = _probe(cm, run, self._data, self.x0, self.derivatives, max_steps)
+        need = _probe(cm, run, self._data, self.x0, self.derivatives)
         self._impl, self.capacity = _program_for(
-            cm, run.model_doses, self.derivatives, max_steps, self.outputs, len(self.names), need
+            cm, run.model_doses, self.derivatives, self.outputs, len(self.names), need
         )
-        self._max_steps = max_steps
 
     def __call__(self, x, *, rtol=None, atol=None) -> dict[str, jax.Array]:
         data = _tolerances(self._data, rtol, atol)
-        out, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
+        out, _, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         return {k: v[: self._n_t] for k, v in out.items()}
 
     def status(self, x, *, rtol=None, atol=None) -> str:
         """``"ok"``, or why the run at ``x`` failed (its outputs are NaN)."""
         data = _tolerances(self._data, rtol, atol)
-        _, code = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
+        _, code, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         code = int(code)
         return "ok" if code == OK else _STATUS.get(code, f"status {code}")
 
@@ -137,10 +136,8 @@ class Function:
         """The most solver steps that the run of ``f(x)`` takes between two doses or events:
         the simulator's ``max_steps`` is a limit on this number. Counted also when the run
         fails. For setting ``max_steps`` from the work a run takes at reasonable values."""
-        impl = _steps_program(
-            self._cm, self._run.model_doses, self._max_steps, self.derivatives, len(self.names)
-        )
-        most, _ = impl(jnp.asarray(x, dtype=jnp.float64), _tolerances(self._data, rtol, atol))
+        x = jax.lax.stop_gradient(jnp.asarray(x, dtype=jnp.float64))  # a count
+        _, _, most = self._impl(x, _tolerances(self._data, rtol, atol))
         return int(most)
 
     def unpack(self, x) -> dict[str, float]:
@@ -182,7 +179,7 @@ class FunctionBatch:
         for sc in scenarios:
             if not isinstance(sc, Scenario):
                 raise TypeError(f"Every scenario is a tq.Scenario, not {sc!r}.")
-        cm, max_steps = _setup(sim)
+        cm = _setup(sim)
         self.scenarios, self.outputs, self.model = scenarios, sim.outputs, sim.model
         runs = [_run_of(sim, cm, sc) for sc in scenarios]
         doses = {run.model_doses for run, _ in runs}
@@ -223,18 +220,17 @@ class FunctionBatch:
         self._data = jax.tree.map(lambda *a: jnp.stack(a), *datas)
         self.derivatives = _choose(derivatives, len(names))
         need = max(
-            _probe(cm, run, d, x0, self.derivatives, max_steps)
+            _probe(cm, run, d, x0, self.derivatives)
             for (run, _), d, x0 in zip(runs, datas, self.x0, strict=True)
         )
         impl, self.capacity = _program_for(
-            cm, runs[0][0].model_doses, self.derivatives, max_steps, self.outputs, len(names), need
+            cm, runs[0][0].model_doses, self.derivatives, self.outputs, len(names), need
         )
         key = ("batch", impl)
         if key not in cm._lazy:
             cm._lazy[key] = jax.jit(jax.vmap(impl))
         self._impl = cm._lazy[key]
         self._cm = cm
-        self._max_steps, self._model_doses = max_steps, runs[0][0].model_doses
         self.n_times = np.array([run.t_out.size for run, _ in runs])
         T = int(self.n_times.max())
         self.mask = np.arange(T)[None, :] < self.n_times[:, None]
@@ -247,7 +243,7 @@ class FunctionBatch:
         return len(self.scenarios)
 
     def __call__(self, X, *, rtol=None, atol=None) -> dict[str, jax.Array]:
-        out, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+        out, _, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
         result = {}
         for k, v in out.items():
             v = v[:, : self._T]
@@ -257,7 +253,7 @@ class FunctionBatch:
 
     def status(self, X, *, rtol=None, atol=None) -> tuple[str, ...]:
         """``"ok"``, or why the run failed (its outputs are NaN), for each scenario."""
-        _, codes = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+        _, codes, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
         return tuple(
             "ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}")
             for c in np.asarray(codes)
@@ -266,13 +262,8 @@ class FunctionBatch:
     def steps(self, X, *, rtol=None, atol=None) -> tuple[int, ...]:
         """The most solver steps between two doses or events, for each scenario (see
         ``Function.steps``)."""
-        impl = _steps_program(
-            self._cm, self._model_doses, self._max_steps, self.derivatives, len(self.names)
-        )
-        key = ("batch", impl)
-        if key not in self._cm._lazy:
-            self._cm._lazy[key] = jax.jit(jax.vmap(impl))
-        most, _ = self._cm._lazy[key](self._x(X), _tolerances(self._data, rtol, atol))
+        X = jax.lax.stop_gradient(self._x(X))  # a count
+        _, _, most = self._impl(X, _tolerances(self._data, rtol, atol))
         return tuple(int(m) for m in np.asarray(most))
 
     def _x(self, X):
@@ -329,11 +320,13 @@ def _choose(derivatives, n_names: int):
 
 
 def _setup(sim):
-    """The compiled model and the step limit; derivatives come from the JAX BDF."""
+    """The compiled model; derivatives come from the JAX BDF. (The step limit, the
+    simulator's ``max_steps``, is an input of the programs, like the tolerances: in
+    ``_run_of``.)"""
     options = dict(sim.options)
     if options.get("method", "BDF") != "BDF":
         raise ValueError("Derivatives come from the JAX BDF; the method must be 'BDF'.")
-    return sim.model.compile(), options.get("max_steps", 100_000)
+    return sim.model.compile()
 
 
 def _run_of(sim, cm, sc):
@@ -359,34 +352,33 @@ def _run_of(sim, cm, sc):
         False,
         regimen,
         sc.initial_vector(cm),
+        max_steps=options.get("max_steps", 100_000),
     )
     return run, regimen
 
 
-def _probe(cm, run, data, x0, derivatives, max_steps) -> int:
+def _probe(cm, run, data, x0, derivatives) -> int:
     """Run once at ``x0``: a scenario that does not run at all is an error here. Returns the
     steps the run took (what sizes the record, for reverse derivatives)."""
     steer = derivatives == "reverse"
-    probe = jb._program(
-        cm, ledger=False, model_doses=run.model_doses, max_steps=max_steps, steer=steer
-    )
+    probe = jb._program(cm, ledger=False, model_doses=run.model_doses, steer=steer)
     args, dot = _inputs(jnp.asarray(x0), data, run.model_doses)
     out = probe(**args, dot=dot) if steer else probe(**args)
     jb._check(cm, out, run)
     return max(int(out["n_steps"]), int(out["segments"])) if steer else 0
 
 
-def _program_for(cm, model_doses, derivatives, max_steps, outputs, p: int, need: int):
+def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int):
     """The jitted program and the record's capacity (0 without a record)."""
     if derivatives == "forward":  # sensitivities carried along the run: no record
-        return _sens_program(cm, model_doses, max_steps, outputs, p), 0
+        return _sens_program(cm, model_doses, outputs, p), 0
     if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
-        return _forward_program(cm, model_doses, max_steps, outputs), 0
+        return _forward_program(cm, model_doses, outputs), 0
     # the run at the scenario's values (steered as f's) sets the room in the record; it
     # only ever grows, so later scenarios of this shape share the build
     capacity = max(jb.slots(record_room(cm.n_states) * need), cm._lazy.get("function_capacity", 0))
     cm._lazy["function_capacity"] = capacity
-    return _function_program(cm, model_doses, capacity, max_steps, outputs), capacity
+    return _function_program(cm, model_doses, capacity, outputs), capacity
 
 
 class Sensitivity:
@@ -650,6 +642,7 @@ def _data(run, where, regimen) -> dict:
         "rtol": jnp.asarray(a["rtol"], dtype=jnp.float64),
         "atol": a["atol"],
         "max_step": jnp.asarray(a["max_step"], dtype=jnp.float64),
+        "max_steps": a["max_steps"],
         "x_theta": pick("theta"),
         "x_dose_amount": pick("dose", "amount", scaled=True),
         "x_dose_time": pick("dose", "time"),
@@ -712,6 +705,7 @@ def _inputs(x, data, model_doses):
         "rtol": data["rtol"],
         "atol": data["atol"],
         "max_step": data["max_step"],
+        "max_steps": data["max_steps"],
     }
     return args, dot
 
@@ -719,14 +713,15 @@ def _inputs(x, data, model_doses):
 # ----------------------------------------------------------------------------- program
 
 
-def _function_program(cm, model_doses: bool, capacity: int, max_steps: int, outputs):
-    """``impl(x, data) -> ({output: (T, ...)}, status)``, jitted once per model structure and
-    these options (shared by every scenario of the same shape)."""
-    key = ("jax_function", model_doses, capacity, max_steps, tuple(outputs), jb.tier(cm))
+def _function_program(cm, model_doses: bool, capacity: int, outputs):
+    """``impl(x, data) -> ({output: (T, ...)}, status, most steps in one segment)``, jitted
+    once per model structure and these options (shared by every scenario of the same
+    shape)."""
+    key = ("jax_function", model_doses, capacity, tuple(outputs), jb.tier(cm))
     if key in cm._lazy:
         return cm._lazy[key]
     run_program = jb._program(
-        cm, ledger=False, model_doses=model_doses, max_steps=max_steps, record=capacity, steer=True
+        cm, ledger=False, model_doses=model_doses, record=capacity, steer=True
     )
     replay_program = jax_replay._replay_program(cm, model_doses)
     outputs_of = _outputs_of(cm, outputs)
@@ -764,7 +759,7 @@ def _function_program(cm, model_doses: bool, capacity: int, max_steps: int, outp
         # first step replays nothing, so its outputs would not depend on x at all)
         bad = jnp.where(status == OK, 0.0, jnp.nan)
         ys = ys * jnp.where(status == OK, 1.0, jnp.nan) + bad * jnp.sum(x)
-        return outputs_of(theta, ys, data["t_out"]), status
+        return outputs_of(theta, ys, data["t_out"]), status, out["most_steps"]
 
     jitted = jax.jit(impl)
     cm._lazy[key] = jitted
@@ -785,18 +780,17 @@ _SPARSE_SECOND = (
 _REGIMEN = ("theta", "b_time", "b_amount", "i_start", "i_stop", "i_rate")
 
 
-def _sens_program(cm, model_doses: bool, max_steps: int, outputs, p: int):
-    """``impl(x, data) -> ({output: (T, ...)}, status)`` with forward sensitivities: one run
+def _sens_program(cm, model_doses: bool, outputs, p: int):
+    """``impl(x, data) -> ({output: (T, ...)}, status, most steps in one segment)`` with
+    forward sensitivities: one run
     carries the derivative of the solution along each entry of ``x`` (``jax_backend._program``,
     ``forward``), and ``jax.jvp``/``jax.grad`` read them (a linear map of the tangent, so
     reverse mode transposes it): no record and no replay. Jitted once per model structure,
     these options and the number of entries of ``x``."""
-    key = ("jax_sens_function", model_doses, max_steps, tuple(outputs), p, jb.tier(cm))
+    key = ("jax_sens_function", model_doses, tuple(outputs), p, jb.tier(cm))
     if key in cm._lazy:
         return cm._lazy[key]
-    run_program = jb._program(
-        cm, ledger=False, model_doses=model_doses, max_steps=max_steps, forward=p
-    )
+    run_program = jb._program(cm, ledger=False, model_doses=model_doses, forward=p)
     outputs_of = _outputs_of(cm, outputs)
     n = cm.n_states
 
@@ -819,12 +813,12 @@ def _sens_program(cm, model_doses: bool, max_steps: int, outputs, p: int):
         real = jnp.isfinite(data["t_out"])
         S = jnp.where(real[:, None, None], S, 0.0)
         y = jnp.where(real[:, None], ys[:, :n], ys[0, :n])  # (and the outputs read from them)
-        return y, S, out["status"]
+        return y, S, out["status"], out["most_steps"]
 
     @jax.custom_jvp
     def states(x, data):
-        ys, _, status = solve(x, data)
-        return ys, status
+        ys, _, status, most = solve(x, data)
+        return ys, status, most
 
     @states.defjvp
     def states_jvp(primals, tangents):
@@ -835,17 +829,18 @@ def _sens_program(cm, model_doses: bool, max_steps: int, outputs, p: int):
             x = jax_order.refuse(x, jax_order.THROUGH_EVENTS)
         elif jb.tier(cm) == "sparse":
             x = jax_order.refuse(x, _SPARSE_SECOND)
-        ys, S, status = solve(x, data)
+        ys, S, status, most = solve(x, data)
         S = jax_order.forward_only(S, _FORWARD_SECOND)
         dys = jnp.einsum("tpn,p->tn", S, tangents[0])
-        return (ys, status), (dys, np.zeros(status.shape, dtype=jax.dtypes.float0))
+        none = lambda a: np.zeros(a.shape, dtype=jax.dtypes.float0)  # noqa: E731 - counts
+        return (ys, status, most), (dys, none(status), none(most))
 
     def impl(x, data):
-        ys, status = states(x, data)
+        ys, status, most = states(x, data)
         args, _ = _inputs(x, data, model_doses)  # theta with x's derivatives, for outputs
         bad = jnp.where(status == OK, 0.0, jnp.nan)
         ys = ys * jnp.where(status == OK, 1.0, jnp.nan) + bad * jnp.sum(x)
-        return outputs_of(args["theta"], ys, data["t_out"]), status
+        return outputs_of(args["theta"], ys, data["t_out"]), status, most
 
     jitted = jax.jit(impl)
     cm._lazy[key] = jitted
@@ -894,13 +889,14 @@ def _no_derivatives_jvp(primals, tangents):
     )
 
 
-def _forward_program(cm, model_doses: bool, max_steps: int, outputs):
-    """``impl(x, data) -> ({output: (T, ...)}, status)`` without derivatives: the solve alone
-    (no steering, no record, no replay), jitted once per model structure and these options."""
-    key = ("jax_forward_function", model_doses, max_steps, tuple(outputs), jb.tier(cm))
+def _forward_program(cm, model_doses: bool, outputs):
+    """``impl(x, data) -> ({output: (T, ...)}, status, most steps)`` without derivatives: the
+    solve alone (no steering, no record, no replay), jitted once per model structure and
+    these options."""
+    key = ("jax_forward_function", model_doses, tuple(outputs), jb.tier(cm))
     if key in cm._lazy:
         return cm._lazy[key]
-    run_program = jb._program(cm, ledger=False, model_doses=model_doses, max_steps=max_steps)
+    run_program = jb._program(cm, ledger=False, model_doses=model_doses)
     outputs_of = _outputs_of(cm, outputs)
 
     def impl(x, data):
@@ -908,42 +904,7 @@ def _forward_program(cm, model_doses: bool, max_steps: int, outputs):
         out = run_program(**args)
         status = out["status"]
         ys = out["ys"] * jnp.where(status == OK, 1.0, jnp.nan)
-        return outputs_of(args["theta"], ys, data["t_out"]), status
-
-    jitted = jax.jit(impl)
-    cm._lazy[key] = jitted
-    return jitted
-
-
-def _steps_program(cm, model_doses: bool, max_steps: int, derivatives, p: int):
-    """``impl(x, data) -> (most steps in one segment, status)`` for the run that a function
-    with these ``derivatives`` makes (its step sizes also follow the derivatives it carries
-    or steers by), with no outputs, record or replay. Jitted once per model structure and
-    these options."""
-    key = ("jax_steps", model_doses, max_steps, derivatives, p, jb.tier(cm))
-    if key in cm._lazy:
-        return cm._lazy[key]
-    forward = p if derivatives == "forward" else 0
-    steer = derivatives == "reverse"
-    run_program = jb._program(
-        cm, ledger=False, model_doses=model_doses, max_steps=max_steps, forward=forward,
-        steer=steer,
-    )  # fmt: skip
-
-    def impl(x, data):
-        x = jax.lax.stop_gradient(x)  # a count
-        args, dot = _inputs(x, data, model_doses)
-        if forward:  # the directions of _sens_program
-
-            def moved(x):
-                a, _ = _inputs(x, data, model_doses)
-                return {k: a[k] for k in _REGIMEN if a[k] is not None}
-
-            size = jnp.where(x != 0, jnp.abs(x), 1.0)
-            dot = jax.vmap(lambda e: jax.jvp(moved, (x,), (e,))[1])(jnp.diag(size))
-            dot = {k: jnp.where(jnp.isfinite(d), d, 0.0) for k, d in dot.items()}
-        out = run_program(**args, dot=dot) if forward or steer else run_program(**args)
-        return out["most_steps"], out["status"]
+        return outputs_of(args["theta"], ys, data["t_out"]), status, out["most_steps"]
 
     jitted = jax.jit(impl)
     cm._lazy[key] = jitted
