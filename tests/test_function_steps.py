@@ -87,3 +87,22 @@ def test_one_count_per_scenario_in_a_batch():
     assert isinstance(counts, tuple) and len(counts) == 3
     singles = [simulator().function(sc, wrt=["ka", "CL"]) for sc in scs]
     assert counts == tuple(f.steps(f.x0) for f in singles)
+
+
+def test_a_new_max_steps_compiles_nothing_new():
+    """The step limit is an input of the compiled programs, like the tolerances: functions
+    from simulators that differ only in max_steps share every build, and the count comes
+    from the function's own program."""
+    m = tq.Model.from_text(PK)
+    f = m.simulator(outputs=["conc"], **TOL).function(scenario(ONE), wrt=["ka", "CL"])
+    x = jnp.asarray(f.x0)
+    f(x), f.steps(x)
+    cm = m.compile()
+    builds = {k for k in cm._lazy if isinstance(k, tuple)}
+    sizes = {k: v._cache_size() for k, v in cm._lazy.items() if hasattr(v, "_cache_size")}
+    g = m.simulator(outputs=["conc"], max_steps=f.steps(x), **TOL).function(
+        scenario(ONE), wrt=["ka", "CL"]
+    )
+    g(x), g.steps(x), g.status(x)
+    assert {k for k in cm._lazy if isinstance(k, tuple)} == builds
+    assert {k: v._cache_size() for k, v in cm._lazy.items() if hasattr(v, "_cache_size")} == sizes

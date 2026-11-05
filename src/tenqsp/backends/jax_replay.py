@@ -91,15 +91,15 @@ def record(
             f"The JAX backend does not yet handle {why}; use backend='scipy' for this model."
         )
     run = jb._prepare(
-        cm, t_span, times, params, theta, "BDF", rtol, atol, max_step, False, regimen, initial
-    )
+        cm, t_span, times, params, theta, "BDF", rtol, atol, max_step, False, regimen, initial,
+        max_steps=max_steps,
+    )  # fmt: skip
     capacity = cm._lazy.get("record_capacity", FIRST_CAPACITY)
     while True:
         program = jb._program(
             cm,
             ledger=False,
             model_doses=run.model_doses,
-            max_steps=max_steps,
             record=capacity,
             steer=direction is not None,
         )

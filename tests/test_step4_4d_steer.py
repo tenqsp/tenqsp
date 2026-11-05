@@ -111,7 +111,7 @@ def _carried_and_exact(sim, sc, wrt):
     steering direction."""
     f = sim.function(sc, wrt=wrt)
     cm = f._cm
-    program = jb._program(cm, ledger=False, model_doses=False, max_steps=100_000, steer=True)
+    program = jb._program(cm, ledger=False, model_doses=False, steer=True)
     x0 = jnp.asarray(f.x0)
     args, dot = _inputs(x0, f._data, False)
     out = program(**args, dot=dot)

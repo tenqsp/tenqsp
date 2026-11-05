@@ -120,11 +120,12 @@ def solve(
     no Radau fallback inside JAX: a failure raises ``SolverError`` naming where, and
     suggesting ``backend="scipy"``."""
     run = _prepare(
-        cm, t_span, times, params, theta, method, rtol, atol, max_step, ledger, regimen, initial
-    )
+        cm, t_span, times, params, theta, method, rtol, atol, max_step, ledger, regimen, initial,
+        max_steps=max_steps,
+    )  # fmt: skip
     t0, t1, t_out, n, th = run.t0, run.t1, run.t_out, run.n, run.th
     infusions, atol_states, y_initial = run.infusions, run.atol_states, run.y_initial
-    program = _program(cm, ledger=ledger, model_doses=regimen is None, max_steps=max_steps)
+    program = _program(cm, ledger=ledger, model_doses=regimen is None)
     start = time.perf_counter()
     out = jax.block_until_ready(program(**run.args))
     wall = time.perf_counter() - start
@@ -184,8 +185,9 @@ class _Run:
 
 
 def _prepare(
-    cm, t_span, times, params, theta, method, rtol, atol, max_step, ledger, regimen, initial=None
-):
+    cm, t_span, times, params, theta, method, rtol, atol, max_step, ledger, regimen, initial=None,
+    max_steps: int = 100_000,
+):  # fmt: skip
     """Check the arguments and lay them out in slots for the program (shared by
     ``solve``, ``record`` and the replay). ``initial``: the starting state (one
     number per state; NaN: the model's own initial value), or None."""
@@ -284,6 +286,7 @@ def _prepare(
         rtol=rtol * shrink,
         atol=jnp.asarray(atol_all),
         max_step=float(max_step),
+        max_steps=jnp.asarray(int(max_steps), dtype=jnp.int64),  # an input: no new compile
     )
     y_initial = np.asarray(cm.initial_state(th), dtype=np.float64)
     if initial is not None:
@@ -391,7 +394,6 @@ def _program(
     *,
     ledger: bool,
     model_doses: bool,
-    max_steps: int,
     record: int = 0,
     steer: bool = False,
     forward: int = 0,
@@ -424,7 +426,7 @@ def _program(
     if forward and (ledger or record or steer):
         raise ValueError("A forward-sensitivity run has no ledger, record or steering.")
     P = forward
-    key = ("jax_program", ledger, model_doses, max_steps) + ((record,) if record else ())
+    key = ("jax_program", ledger, model_doses) + ((record,) if record else ())
     key += ("steer",) if steer else ()
     key += (("forward", forward),) if forward else ()
     key += ("sparse",) if tier(cm) == "sparse" else ()
@@ -464,6 +466,7 @@ def _program(
         rtol,
         atol,
         max_step,
+        max_steps,
         y_start=None,
         dot=None,
     ):
