@@ -279,6 +279,26 @@ error, so an optimizer can step back. `f.status(x)` says `"ok"` or why the run f
 print(f.status(f.x0))                  # ok
 ```
 
+**How much work a run takes.** `f.steps(x)` is the most steps the solver takes for `f(x)`
+between two doses or events. The simulator's `max_steps` (100,000 by default) is a limit
+on this number; a run that reaches it fails with the status "too many steps". The count
+is that of `f`'s own run, whose steps also follow the derivatives it carries, and it is
+given also when the run fails. Values far outside a model's range can make a run take
+far more steps than usual (a fast clearance here):
+
+```python
+print(f.steps(f.x0))                         # 117
+print(f.steps(np.array([400.0, 30.0])))      # 416
+```
+
+A program that calls `f` at many values chosen by an optimizer can then set `max_steps`
+from the work at reasonable values, say 50 times `f.steps(f.x0)`, so that a run at an
+extreme value fails quickly instead of taking minutes. A function of several scenarios
+gives one count per scenario: `fs.steps(X)`.
+
+!!! note "New in 0.7.0 (not yet released)"
+    `f.steps` comes with TenQSP 0.7.0.
+
 **The record has room** (reverse only) for 4 times the steps of the run at `f.x0` (2 times on
 models above 2,000 states, to halve the memory a gradient needs there). An `x`, or a much tighter
 `rtol` given to one call, that needs more gives NaN, with the status "too many steps for the

@@ -288,8 +288,9 @@ class Simulator:
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
         1-D array in ``f.names`` order; ``jax.grad``, ``jax.jit`` and ``jax.vmap`` work on
-        it. A failed run gives NaN (``f.status(x)`` says why). Names: a parameter (``"CL"``,
-        ``"k"`` for every entry, ``"k[R]"``), or a number of the scenario's regimen, from 1
+        it. A failed run gives NaN (``f.status(x)`` says why; ``f.steps(x)``: the most
+        solver steps between two doses or events). Names: a parameter (``"CL"``, ``"k"``
+        for every entry, ``"k[R]"``), or a number of the scenario's regimen, from 1
         in time order: ``"dose 1 amount"``, ``"dose 1 time"``, ``"infusion 1 rate"`` (or
         ``amount``, ``duration``, ``start``). Always uses the JAX solver; see
         ``gradients``. ``derivatives=``: ``"auto"`` (the default: ``"forward"`` up to 40

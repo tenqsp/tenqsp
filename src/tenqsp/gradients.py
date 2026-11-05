@@ -90,6 +90,7 @@ class Function:
     docstring). ``f.names``: what each entry of ``x`` is; ``f.x0``: their values in the
     scenario; ``f(x)``: ``{output: array (n_t, ...)}``; ``f.unpack(x)``: ``x`` by name;
     ``f.status(x)``: ``"ok"`` or why the run at ``x`` failed (outputs NaN);
+    ``f.steps(x)``: the most solver steps of that run between two doses or events;
     ``f.derivatives``: ``"forward"``, ``"reverse"`` or ``False``.
 
     ``f(x, rtol=..., atol=...)`` runs that call at other tolerances than the simulator's
@@ -118,6 +119,7 @@ class Function:
         self._impl, self.capacity = _program_for(
             cm, run.model_doses, self.derivatives, max_steps, self.outputs, len(self.names), need
         )
+        self._max_steps = max_steps
 
     def __call__(self, x, *, rtol=None, atol=None) -> dict[str, jax.Array]:
         data = _tolerances(self._data, rtol, atol)
@@ -130,6 +132,16 @@ class Function:
         _, code = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         code = int(code)
         return "ok" if code == OK else _STATUS.get(code, f"status {code}")
+
+    def steps(self, x, *, rtol=None, atol=None) -> int:
+        """The most solver steps that the run of ``f(x)`` takes between two doses or events:
+        the simulator's ``max_steps`` is a limit on this number. Counted also when the run
+        fails. For setting ``max_steps`` from the work a run takes at reasonable values."""
+        impl = _steps_program(
+            self._cm, self._run.model_doses, self._max_steps, self.derivatives, len(self.names)
+        )
+        most, _ = impl(jnp.asarray(x, dtype=jnp.float64), _tolerances(self._data, rtol, atol))
+        return int(most)
 
     def unpack(self, x) -> dict[str, float]:
         """``x`` by name."""
@@ -155,8 +167,9 @@ class FunctionBatch:
     largest number of doses, infusions and output times among them with slots the solver
     never reaches (at t = +inf), so the padding changes no value and no derivative. Each
     scenario's outputs fill ``fs.n_times[i]`` times (``fs.t[i]``, ``fs.mask[i]``); the
-    rest of the row is NaN. ``fs.status(X)``: one ``"ok"`` or reason per scenario. The names
-    in ``wrt`` are those of ``sim.function``; a dose number must exist in every scenario.
+    rest of the row is NaN. ``fs.status(X)``: one ``"ok"`` or reason per scenario;
+    ``fs.steps(X)``: one step count per scenario. The names in ``wrt`` are those of
+    ``sim.function``; a dose number must exist in every scenario.
     ``fs(X, rtol=..., atol=...)``: other tolerances for this call, as for ``sim.function``."""
 
     def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto"):
@@ -221,6 +234,7 @@ class FunctionBatch:
             cm._lazy[key] = jax.jit(jax.vmap(impl))
         self._impl = cm._lazy[key]
         self._cm = cm
+        self._max_steps, self._model_doses = max_steps, runs[0][0].model_doses
         self.n_times = np.array([run.t_out.size for run, _ in runs])
         T = int(self.n_times.max())
         self.mask = np.arange(T)[None, :] < self.n_times[:, None]
@@ -248,6 +262,18 @@ class FunctionBatch:
             "ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}")
             for c in np.asarray(codes)
         )
+
+    def steps(self, X, *, rtol=None, atol=None) -> tuple[int, ...]:
+        """The most solver steps between two doses or events, for each scenario (see
+        ``Function.steps``)."""
+        impl = _steps_program(
+            self._cm, self._model_doses, self._max_steps, self.derivatives, len(self.names)
+        )
+        key = ("batch", impl)
+        if key not in self._cm._lazy:
+            self._cm._lazy[key] = jax.jit(jax.vmap(impl))
+        most, _ = self._cm._lazy[key](self._x(X), _tolerances(self._data, rtol, atol))
+        return tuple(int(m) for m in np.asarray(most))
 
     def _x(self, X):
         X = jnp.asarray(X, dtype=jnp.float64)
@@ -883,6 +909,41 @@ def _forward_program(cm, model_doses: bool, max_steps: int, outputs):
         status = out["status"]
         ys = out["ys"] * jnp.where(status == OK, 1.0, jnp.nan)
         return outputs_of(args["theta"], ys, data["t_out"]), status
+
+    jitted = jax.jit(impl)
+    cm._lazy[key] = jitted
+    return jitted
+
+
+def _steps_program(cm, model_doses: bool, max_steps: int, derivatives, p: int):
+    """``impl(x, data) -> (most steps in one segment, status)`` for the run that a function
+    with these ``derivatives`` makes (its step sizes also follow the derivatives it carries
+    or steers by), with no outputs, record or replay. Jitted once per model structure and
+    these options."""
+    key = ("jax_steps", model_doses, max_steps, derivatives, p, jb.tier(cm))
+    if key in cm._lazy:
+        return cm._lazy[key]
+    forward = p if derivatives == "forward" else 0
+    steer = derivatives == "reverse"
+    run_program = jb._program(
+        cm, ledger=False, model_doses=model_doses, max_steps=max_steps, forward=forward,
+        steer=steer,
+    )  # fmt: skip
+
+    def impl(x, data):
+        x = jax.lax.stop_gradient(x)  # a count
+        args, dot = _inputs(x, data, model_doses)
+        if forward:  # the directions of _sens_program
+
+            def moved(x):
+                a, _ = _inputs(x, data, model_doses)
+                return {k: a[k] for k in _REGIMEN if a[k] is not None}
+
+            size = jnp.where(x != 0, jnp.abs(x), 1.0)
+            dot = jax.vmap(lambda e: jax.jvp(moved, (x,), (e,))[1])(jnp.diag(size))
+            dot = {k: jnp.where(jnp.isfinite(d), d, 0.0) for k, d in dot.items()}
+        out = run_program(**args, dot=dot) if forward or steer else run_program(**args)
+        return out["most_steps"], out["status"]
 
     jitted = jax.jit(impl)
     cm._lazy[key] = jitted
