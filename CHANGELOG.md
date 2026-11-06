@@ -5,6 +5,12 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Changed
+- `m.diagnostics(sol)`: the note on a total that fell below `atol` and stayed there is only
+  for a field or compartment that can grow from a remnant of itself (on a loop of feeds:
+  bacteria, phage through infected cells), no longer for a depot that empties at the end of
+  a dose.
+
 ### Added
 - The constant `pi` in formulas (π), in models and in `tq.formula` (where it is not one of
   `f.names`). A model that declares a name `pi` of its own keeps its meaning, as a model name

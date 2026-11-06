@@ -337,6 +337,25 @@ def test_diagnostics_notes_a_population_absorbed_below_atol():
     assert any("stayed there" in i.message and i.where == "B" for i in rep.notes)
 
 
+def test_dip_note_only_for_what_feeds_itself():
+    """The note is for a population that might grow back from a remnant: a state on a loop
+    of feeds. P and I feed each other (as phage and infected cells); X is fed by P and feeds
+    nothing back; a depot empties into the central compartment, which only eliminates."""
+    m = tq.Model.from_text(
+        "d_t(P) = 0.5*I - P\nd_t(I) = 0.5*P - I\nd_t(X) = 0.1*P - 5*X\nP(0) = 1\nX(0) = 1\n"
+    )
+    sol = m.solve((0, 40), times=np.linspace(0, 40, 81), atol=1e-6)
+    noted = {i.where for i in m.diagnostics(sol).notes if "stayed there" in i.message}
+    assert noted == {"P", "I"}
+    pk = tq.Model.from_text(
+        "param ka=1.5, ke=0.8\nd_t(depot) = -ka*depot\nd_t(centr) = ka*depot - ke*centr\n"
+        "depot(0) = 4\n"
+    )
+    sol = pk.solve((0, 48), times=np.linspace(0, 48, 97), atol=1e-6)
+    assert np.asarray(sol["depot"])[-1] < 1e-6 and np.asarray(sol["centr"])[-1] < 1e-6
+    assert not any("stayed there" in i.message for i in pk.diagnostics(sol).notes)
+
+
 def test_diagnostics_negative_values_and_ledger():
     m = tq.Model.from_text("d_t(P) = -1\nP(0) = 1\n")
     sol = m.solve((0, 3), times=[0, 3.0])
