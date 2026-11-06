@@ -312,11 +312,18 @@ With a solution, `diagnostics` adds what only a run can show:
 | a dose larger than `atol` can carry | warning | a dose that raised a state by more than about `atol` / 1e-14 leaves rounding errors above `atol`; the message names the `atol` to use ([Numerical choices](numerics.md#tolerances)) |
 | negative values | warning | a field or compartment below −10 × `atol` |
 | fell below `atol` and grew back | warning | below `atol` the solver does not resolve a population, so the regrowth may be an artefact |
-| fell below `atol` and stayed there | note | the run did not decide whether it would have grown back |
+| fell below `atol` and stayed there | note | the run did not decide whether it would have grown back; only for what can grow from itself (below) |
 | ledger closure | note, or warning above 1e-6 | the largest unexplained amount, relative |
 
 The two checks on populations below `atol` skip anything covered by an extinction group
 whose threshold is at least `atol`: there the choice has been made explicitly.
+
+The note on a total that stayed below `atol` is only for a field or compartment that can grow
+from a remnant of itself: one on a loop of feeds, where a larger amount of each makes the next
+grow faster somewhere along the run. Bacteria that divide feed themselves; phage feed
+themselves through infected cells. A dosing depot that empties into a central compartment,
+or a central compartment that only eliminates, is on no loop: emptying is the end of a dose,
+and there is nothing to note.
 
 ```python
 print(phage.diagnostics(sol))

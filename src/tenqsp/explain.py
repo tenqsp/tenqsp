@@ -1247,6 +1247,7 @@ def _solution_checks(cm, ir: ModelIR, sol) -> list[Issue]:
                 f"atol={atol_floor(rise):.0e} or larger.",
             )
         )
+    feeds_itself = None  # computed at the first dip: only then is it needed
     for name in names:
         vals = np.asarray(sol[name])
         low = float(np.min(vals)) if vals.size else 0.0
@@ -1273,7 +1274,9 @@ def _solution_checks(cm, ir: ModelIR, sol) -> list[Issue]:
             None,
         )
         stays = _dip(total, atol)
-        if stays is not None:
+        if stays is not None and feeds_itself is None:
+            feeds_itself = _feeds_itself(cm, sol)
+        if stays is not None and name in feeds_itself:
             out.append(
                 Issue(
                     "note",
@@ -1310,6 +1313,43 @@ def _solution_checks(cm, ir: ModelIR, sol) -> list[Issue]:
             )
         )
     return out
+
+
+FEED_TOL = 1e-6  # a rate x the run's length below this is rounding, not a feed
+
+
+def _feeds_itself(cm, sol, n_times: int = 25) -> set[str]:
+    """The fields and compartments that can grow from a remnant of themselves: those on a loop
+    of feeds, a state B feeding A where a larger B makes A's total grow faster (dA/dt rises
+    with B) somewhere along the run. Bacteria growing (g*S) feed themselves; phage feed
+    themselves through infected cells (P -> I -> P). A depot that only empties into another
+    compartment does not, so its falling below atol is the end of a dose, not a population
+    that might have grown back."""
+    import jax
+    import jax.numpy as jnp
+
+    names = list(cm.layout.slices)
+    size = cm.layout.size
+    w = jnp.asarray(cm.measure(sol.theta))
+    group = np.zeros((len(names), size))
+    for k, sl in enumerate(cm.layout.slices.values()):
+        group[k, sl] = 1.0
+    group = jnp.asarray(group) * w
+
+    def totals_rate(y, t):
+        return group @ cm.rhs(t, y, sol.theta)[:size]
+
+    jac = jax.jit(jax.jacrev(totals_rate))
+    span = float(sol.t[-1] - sol.t[0]) or 1.0
+    feeds = np.zeros((len(names), len(names)), dtype=bool)  # feeds[a, b]: b feeds a
+    for i in np.unique(np.linspace(0, len(sol.t) - 1, n_times).astype(int)):
+        c = np.asarray(jac(jnp.asarray(sol.y[i]), float(sol.t[i])))[:, :size]
+        for b, sl in enumerate(cm.layout.slices.values()):
+            feeds[:, b] |= np.max(c[:, sl], axis=1) * span > FEED_TOL
+    reach = feeds.copy()  # reach[a, b]: b feeds a through a chain of feeds
+    for k in range(len(names)):
+        reach |= reach[:, [k]] & reach[[k], :]
+    return {n for k, n in enumerate(names) if reach[k, k]}
 
 
 def _dip(total: np.ndarray, atol: float):
