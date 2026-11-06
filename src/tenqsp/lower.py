@@ -631,6 +631,8 @@ class Evaluator:
             if e in (sp.oo, -sp.oo):
                 return jnp.inf if e == sp.oo else -jnp.inf
             return float(e)
+        if e.is_NumberSymbol:  # pi
+            return float(e)
         if isinstance(e, sp.Add):
             return reduce(lambda a, b: a + b, (self.expr(a) for a in e.args))
         if isinstance(e, sp.Mul):

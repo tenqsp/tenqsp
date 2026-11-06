@@ -1232,6 +1232,8 @@ These names are **not** reserved:
   arguments is still the function. `param beta=50` and `param gamma=0.17` are common and fine.
 - The words `lower`, `upper`, `at`, `lag`, `bioavailability`, `otherwise`, `every`, `using`,
   `sharp`: `lag = 2*x` is a named formula (`lag depot = …`, with a place, is the statement).
+- **`pi`.** In a formula `pi` is π, unless the model declares a name `pi` of its own
+  (`param pi=0.3`); then it is that value, as for a function name.
 - Names that start like an operator, `d_x` or `int_y` as a parameter: an operator is
   recognised only when it is called, `d_x(…)`. They are best avoided all the same, since a
   reader of the model will take them for operators.

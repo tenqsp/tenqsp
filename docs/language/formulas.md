@@ -59,6 +59,10 @@ call        ::= function "(" formula { "," formula } ")"
 | definition (`m.define("h", ...)`) | the named formula, as if written out |
 | integral (`m.integral(B, over=z)`) | the total over the named axes; varies over the others |
 | `t` | time |
+| `pi` | π (3.14159…), unless the model declares a name `pi` of its own |
+
+There is no constant `e`: Euler's number is `exp(1)`. A constant `e` would turn a forgotten
+declaration of a parameter `e` into 2.718 instead of an error.
 
 Names are identifiers, unique across the model, and not Python keywords (`if`, `and`, `not`,
 `lambda`, … are refused with a suggestion such as `lambda_`). Function names (`sin`, `max`)

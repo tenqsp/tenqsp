@@ -6,6 +6,9 @@ versioning; `0.x` releases may change the API.
 ## [Unreleased]
 
 ### Added
+- The constant `pi` in formulas (π), in models and in `tq.formula` (where it is not one of
+  `f.names`). A model that declares a name `pi` of its own keeps its meaning, as a model name
+  may match a function name. There is no constant `e`: Euler's number is `exp(1)`.
 - `sim.function(..., derivatives="forward")`: forward sensitivities. The run carries the
   derivative of every state with respect to every name in `wrt`, with no record and no
   replay. Cost grows with the number of names (2–3 solves plus a fraction of a solve per

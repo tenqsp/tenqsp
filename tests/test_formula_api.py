@@ -37,6 +37,26 @@ def test_functions_and_conditionals():
     np.testing.assert_allclose(got, want, rtol=1e-14)
 
 
+def test_pi():
+    """``pi`` is the constant (not a name to give a value for); Euler's number is exp(1)."""
+    f = tq.formula("2*pi*r")
+    assert f.names == ("r",)
+    assert float(f.jax(["r"])(1.5)) == pytest.approx(3 * np.pi, rel=1e-15)
+    assert tq.formula("e^2").names == ("e",)  # a name, not a constant
+
+
+def test_pi_in_a_model_and_a_name_of_its_own():
+    """A(t) = exp(-pi r^2 t/100); a model that declares 'pi' means its own value."""
+    text = "model circ\nparam r=2\nd_t(A) = -pi*r^2*A/100\nA(0) = 1\nobservable amount = A\n"
+    sol = tq.Model.from_text(text).solve((0, 2), times=[1.0, 2.0], rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(sol["amount"], np.exp(-np.pi * 4 / 100 * np.array([1, 2])),
+                               rtol=1e-8)  # fmt: skip
+    own = text.replace("model circ\nparam r=2", "model own\nparam r=2, pi=0.3")
+    sol = tq.Model.from_text(own).solve((0, 1), times=[1.0], rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(sol["amount"], [np.exp(-0.3 * 4 / 100)], rtol=1e-8)
+    assert r"\pi \, r^{2}" in tq.Model.from_text(text).to_latex()
+
+
 def test_derivatives_jit_and_vmap():
     g = tq.formula("a * exp(-k*t)").jax(["a", "k", "t"])
     t = jnp.linspace(0.0, 5.0, 6)
