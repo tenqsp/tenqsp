@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 
 import sympy as sp
 
-from .expr import SHAPES, FormulaError, is_condition, parse
+from .expr import CONSTANTS, SHAPES, FormulaError, is_condition, parse
 from .model import Formula, as_formula
 
 __all__ = ["formula"]
@@ -50,6 +50,7 @@ def names_in(text: str) -> tuple[str, ...]:
                 )
     names = sorted(
         {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and id(n) not in called}
+        - CONSTANTS.keys()
     )
     expr = parse(text, {n: sp.Symbol(n) for n in names})  # grammar, functions, messages
     if is_condition(expr):

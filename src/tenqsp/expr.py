@@ -6,6 +6,9 @@ A formula is read with Python's ``ast`` module and turned into SymPy by walking 
 of syntax. Nothing is passed to ``eval``/``exec``. Allowed:
 
 - numbers, names, ``+ - * /``, power as ``**`` or ``^``, unary minus;
+- the constant ``pi`` (``CONSTANTS``), unless the model declares a name ``pi`` of its own, as a
+  model name may match a function name. Euler's number is ``exp(1)``: a constant ``e`` would turn
+  a forgotten declaration of a name ``e`` into 2.718 instead of an error;
 - functions (the set of Monolix's Mlxtran, which covers NONMEM's built-ins; ADR 0005):
   ``exp log log10 sqrt abs max min``; trigonometric ``sin cos tan asin acos atan atan2`` and
   hyperbolic ``sinh cosh tanh``; ``logit`` and its inverse ``sigmoid``;
@@ -37,6 +40,8 @@ import math
 from collections.abc import Callable, Mapping
 
 import sympy as sp
+
+CONSTANTS = {"pi": sp.pi}
 
 
 class FormulaError(ValueError):
@@ -553,6 +558,8 @@ def parse(text: str, names: Mapping[str, sp.Basic]) -> sp.Expr:
         if isinstance(node, ast.Name):
             if node.id in names:
                 return names[node.id]
+            if node.id in CONSTANTS:
+                return CONSTANTS[node.id]
             if node.id in FUNCTIONS or node.id in SHAPES or node.id == "grad":
                 raise FormulaError(
                     f"'{node.id}' is a function; call it as {node.id}(...) {where(node)}."
