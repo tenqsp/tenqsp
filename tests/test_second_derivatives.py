@@ -93,6 +93,7 @@ def check(f, x, output, rtol, seconds=(jax.hessian, FORWARD, REVERSE)):
         np.testing.assert_allclose(H, ref, rtol=0, atol=rtol * scale)
 
 
+@pytest.mark.timeout(600)  # 15-35 s here; a slow CI runner takes about 4 times as long
 @pytest.mark.parametrize("case", list(PK_CASES))
 def test_doses_and_an_infusion_reverse(case):
     sim = tq.Model.from_text(PK).simulator(outputs=["conc"], **TIGHT)
@@ -100,6 +101,7 @@ def test_doses_and_an_infusion_reverse(case):
     check(f, f.x0, "conc", rtol=1e-5)
 
 
+@pytest.mark.timeout(600)  # 15-35 s here; a slow CI runner takes about 4 times as long
 @pytest.mark.parametrize("case", list(PK_CASES))
 def test_doses_and_an_infusion_forward(case):
     sim = tq.Model.from_text(PK).simulator(outputs=["conc"], **TIGHT)
@@ -122,6 +124,7 @@ def sparse_function(derivatives, monkeypatch):
     )
 
 
+@pytest.mark.timeout(600)  # 15-35 s here; a slow CI runner takes about 4 times as long
 def test_a_model_on_the_sparse_tier_reverse(monkeypatch):
     f = sparse_function("reverse", monkeypatch)
     # jax.hessian only: each form is a compile of its own, and the forms are checked above
