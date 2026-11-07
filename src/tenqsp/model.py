@@ -1405,7 +1405,9 @@ class Model:
           compartment (``rate`` may vary over the slice, e.g. ``Q[organ]``); the compartment
           loses the sum.
         - slice -> compartment: the compartment receives the sum over the slice.
-        - slice -> slice: element by element (the two slices leave the same axes free).
+        - slice -> slice: element by element over the axes both leave free; an end with
+          fewer free axes (one it leaves out or fixes, ``A.at(organ="liver")``) gives or
+          takes the sum over the others.
 
         With volumes or weights, the value is a concentration and ``rate`` a flow or
         clearance (volume per time): ``m.transfer(C.at(sub="vascular"), to=Cven,
