@@ -5,11 +5,7 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
-### Changed
-- `m.diagnostics(sol)`: the note on a total that fell below `atol` and stayed there is only
-  for a field or compartment that can grow from a remnant of itself (on a loop of feeds:
-  bacteria, phage through infected cells), no longer for a depot that empties at the end of
-  a dose.
+## [0.7.0] — 2026-11-07
 
 ### Added
 - The constant `pi` in formulas (π), in models and in `tq.formula` (where it is not one of
@@ -94,6 +90,16 @@ versioning; `0.x` releases may change the API.
 - `sim.function` derivatives: the replay skips the unused room in its record in blocks
   instead of step by step, forward and in reverse. Same results; a gradient of a small model
   costs about half as much (one theophylline subject: 54 ms to 24 ms).
+- `m.diagnostics(sol)`: the note on a total that fell below `atol` and stayed there is only
+  for a field or compartment that can grow from a remnant of itself (on a loop of feeds:
+  bacteria, phage through infected cells), no longer for a depot that empties at the end of
+  a dose.
+
+### Documentation
+- Install page: the combined `pip install "tenqsp[plot,xarray]"`, the command for an NVIDIA
+  GPU (`pip install -U "jax[cuda12]"`), and when a GPU pays (batches of scenarios as one
+  JAX function).
+- About page: why the name.
 
 ## [0.6.1] — 2026-10-31
 

@@ -183,9 +183,6 @@ model structure; after that, new values reuse the build.
 
 ### Many scenarios at once
 
-!!! note "New in 0.7.0 (not yet released)"
-    `sim.function` with a list of scenarios comes with TenQSP 0.7.0.
-
 For a population (one scenario per subject, each with its own doses and sampling times),
 give `sim.function` a list of scenarios. The result is one JAX function of a table of
 values, one row per scenario, and every scenario runs in one `jax.vmap` call of one build:
@@ -228,10 +225,6 @@ function to within the solver's tolerance: running in one `jax.vmap` call rounds
 differently, which can move a solver step.
 
 ## How the derivatives are computed
-
-!!! note "New in 0.7.0 (not yet released)"
-    `derivatives="forward"`, `"reverse"` and `"auto"` come with TenQSP 0.7.0. With 0.6.1
-    from PyPI, `sim.function` always records and replays (what `"reverse"` does here).
 
 `f` gets its derivatives in one of two ways, chosen by `derivatives=`:
 
@@ -295,9 +288,6 @@ A program that calls `f` at many values chosen by an optimizer can then set `max
 from the work at reasonable values, say 50 times `f.steps(f.x0)`, so that a run at an
 extreme value fails quickly instead of taking minutes. A function of several scenarios
 gives one count per scenario: `fs.steps(X)`.
-
-!!! note "New in 0.7.0 (not yet released)"
-    `f.steps` comes with TenQSP 0.7.0.
 
 **The record has room** (reverse only) for 4 times the steps of the run at `f.x0` (2 times on
 models above 2,000 states, to halve the memory a gradient needs there). An `x`, or a much tighter

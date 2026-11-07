@@ -23,6 +23,14 @@ the boundary conditions, the bookkeeping, the stiff solver and the derivatives. 
 to let ODE modellers step into PDE modelling without first becoming numerical analysts, and
 to make structured-population models an everyday part of pharmacometrics.
 
+## Why the name
+
+"Ten" stands for **tensors**. The finite-volume method turns a field over axes into an
+array, a tensor, with one dimension per axis, and every term of a model acts on that array
+as a whole. The idea grew out of the author's earlier work on a tensor model of
+heterogeneous bacterial populations treated with several phages and antibiotics, with one
+categorical axis per resistance.
+
 ## Free for everyone
 
 TenQSP is open source under the Apache License 2.0: free to use, modify and redistribute,
