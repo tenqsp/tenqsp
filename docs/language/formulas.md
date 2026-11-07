@@ -59,7 +59,7 @@ call        ::= function "(" formula { "," formula } ")"
 | definition (`m.define("h", ...)`) | the named formula, as if written out |
 | integral (`m.integral(B, over=z)`) | the total over the named axes; varies over the others |
 | `t` | time |
-| `pi` | π (3.14159…), unless the model declares a name `pi` of its own |
+| `pi` | π (3.14159…), unless the model declares a name `pi` of its own (in `tq.formula`, unless a value for `pi` is given) |
 
 There is no constant `e`: Euler's number is `exp(1)`. A constant `e` would turn a forgotten
 declaration of a parameter `e` into 2.718 instead of an error.

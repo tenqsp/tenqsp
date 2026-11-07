@@ -35,8 +35,8 @@ from typing import Literal
 import numpy as np
 import sympy as sp
 
+from tenqsp.expr import CONSTANTS, FormulaError, end_key, grads_used, parse, shapes_used
 from tenqsp.expr import NON_SMOOTH_TYPES as NON_SMOOTH
-from tenqsp.expr import FormulaError, end_key, grads_used, parse, shapes_used
 from tenqsp.ir import (
     BOUNDARY_KINDS,
     READABLE_VERSIONS,
@@ -171,6 +171,16 @@ class _Checker:
             elif what in ("axis", "parameter", "field", "compartment", "definition", "integral"):
                 self.symbols[n] = sp.Symbol(n, real=True)
         self.symbols["t"] = sp.Symbol("t", real=True)
+        # a declared pi replaces the constant; a name formulas cannot read (an observable,
+        # a flux, ...) cannot, so formulas would silently read the constant
+        for n in CONSTANTS:
+            if n in self.kind and n not in self.symbols:
+                self.add(
+                    "error",
+                    f"{self.kind[n]} '{n}'",
+                    f"formulas read '{n}' as the constant {n}, since they cannot read "
+                    f"this {self.kind[n]}; give it another name.",
+                )
         # a field read at one end of each of its continuous axes, D(z=lower) (IR 0.10)
         self.end_of: dict[str, tuple[str, str, str]] = {}
         for f in ir.fields:

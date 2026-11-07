@@ -97,7 +97,9 @@ def compile_free(text: str, names: Sequence[str]) -> Callable:
             f"The formula {text.strip()!r} uses {', '.join(map(repr, missing))}, not in "
             f"names={names}; give every name it uses ({', '.join(used)})."
         )
-    expr = parse(text, {n: sp.Symbol(n) for n in used})
+    # a value given for a constant's name (pi) replaces the constant
+    given = [n for n in CONSTANTS if n in names]
+    expr = parse(text, {n: sp.Symbol(n) for n in (*used, *given)})
     from .lower import Evaluator  # JAX is imported only when a formula is evaluated
 
     class _Values(Evaluator):

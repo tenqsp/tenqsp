@@ -38,11 +38,20 @@ def test_functions_and_conditionals():
 
 
 def test_pi():
-    """``pi`` is the constant (not a name to give a value for); Euler's number is exp(1)."""
+    """``pi`` is the constant (not one of ``f.names``); Euler's number is exp(1)."""
     f = tq.formula("2*pi*r")
     assert f.names == ("r",)
     assert float(f.jax(["r"])(1.5)) == pytest.approx(3 * np.pi, rel=1e-15)
     assert tq.formula("e^2").names == ("e",)  # a name, not a constant
+    # a value given for pi replaces the constant
+    assert float(f.jax(["pi", "r"])(5.0, 1.0)) == pytest.approx(10.0, rel=1e-15)
+
+
+def test_an_observable_named_pi_is_refused():
+    """Formulas cannot read an observable, so 'pi' in them would be the constant."""
+    text = "model obs\nparam k=1\nd_t(A) = -k*A\nA(0) = 1\nobservable pi = A\nobservable o = 2*pi\n"
+    with pytest.raises(tq.ModelError, match="formulas read 'pi' as the constant pi"):
+        tq.Model.from_text(text)
 
 
 def test_pi_in_a_model_and_a_name_of_its_own():

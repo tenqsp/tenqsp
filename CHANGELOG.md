@@ -14,7 +14,10 @@ versioning; `0.x` releases may change the API.
 ### Added
 - The constant `pi` in formulas (π), in models and in `tq.formula` (where it is not one of
   `f.names`). A model that declares a name `pi` of its own keeps its meaning, as a model name
-  may match a function name. There is no constant `e`: Euler's number is `exp(1)`.
+  may match a function name, and in `tq.formula` a value given for `pi` (`f.jax(["pi", ...])`)
+  replaces the constant. A name formulas cannot read, such as an observable, cannot be called
+  `pi` (formulas would silently read the constant). There is no constant `e`: Euler's number
+  is `exp(1)`.
 - `sim.function(..., derivatives="forward")`: forward sensitivities. The run carries the
   derivative of every state with respect to every name in `wrt`, with no record and no
   replay. Cost grows with the number of names (2–3 solves plus a fraction of a solve per
@@ -56,6 +59,11 @@ versioning; `0.x` releases may change the API.
   the sum over the others (`sum_organ(J_art)`), as a compartment already did. A whole-body
   PBPK model with two drugs can then keep its fluxes and their balance check. Ends that share
   no such order (`B(drug) -> C(organ)`) are still refused.
+- `m.transfer` with an end that fixes an axis by its slice, `A.at(organ="liver") -> B` over
+  drug and organ (or the reverse): the fixed end now gives or takes the sum over that axis,
+  so the transfer conserves the amount, as `explain()` says. It gave or took one
+  destination element's share only. The case with every axis fixed,
+  `A.at(drug="d1", organ="liver") -> B`, was already wrong in 0.6.1.
 - Second derivatives of a function from `sim.function` (`jax.hessian`, or `jax.jacfwd` or
   `jax.jacrev` of `jax.grad`). With `derivatives="reverse"` they were wrong, with no
   warning; with `"forward"`, `jax.hessian` failed with an error from inside the solver.
@@ -78,8 +86,8 @@ versioning; `0.x` releases may change the API.
   faster for every whole table of derivatives (`jax.jacfwd`) and, for a gradient
   (`jax.grad`), up to 40–50 names: 12 theophylline subjects in one `jax.vmap` call, 111 ms
   to 32 ms per gradient. Results agree with reverse to the solver's tolerance. A function
-  made by `"auto"` keeps no record, so the status "too many steps for the record" no longer
-  occurs with it.
+  made by `"auto"` with up to 40 names keeps no record, so the status "too many steps for
+  the record" no longer occurs with it.
 - The JAX solver's step limit (`max_steps`) is an input of its compiled programs, like the
   tolerances: simulators that differ only in `max_steps` share every build, with no new
   compile.
