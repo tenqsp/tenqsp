@@ -101,9 +101,6 @@ fit theoph_pop          # TenQSP stops reading here
 ...
 ```
 
-!!! note "New in 0.7.0 (not yet released)"
-    With 0.6.1 from PyPI, a `fit` line is an unknown statement.
-
 ## Statements
 
 ### model

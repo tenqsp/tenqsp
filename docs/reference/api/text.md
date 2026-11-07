@@ -19,9 +19,6 @@ g(0.04, jnp.array([60.0, 80.0]))        # works with jax.grad, jax.jit and jax.v
 Outside a model every name is one value, so what works over a model's axes (shape functions,
 `grad`, `k[s]`, a field at one end) is refused with a message.
 
-!!! note "New in 0.7.0 (not yet released)"
-    `tq.formula`, `f.names` and `f.jax` come with TenQSP 0.7.0.
-
 ::: tenqsp.load
 
 ::: tenqsp.table
