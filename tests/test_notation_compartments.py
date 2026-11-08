@@ -298,6 +298,8 @@ def test_table_turns_a_long_table_into_nested_braces():
         ("field B(z)", "nothing named 'z'"),
         ("d_t(P) = -int_a(P)", "'a' is not an axis"),
         ("param k = kk/2", "name a formula instead"),
+        ("param T = 1\nd_t(P) = 0\ndose P at t=T: 1", r"Dose times are fixed .* 'lag P = tlag'"),
+        ("param T = 1\nd_t(P) = 0\ndose P at t=0 to T every 1: 1", "give a lag time"),
         ("param k[s] = 1", "in braces"),
         ("init P = 1", r"written X\(0\) = value"),
         (
