@@ -5,6 +5,12 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Fixed
+- A dose time written as a name (`dose A at t=Tdose: D1`) was refused with the advice to name a
+  formula, which cannot help: dose times are fixed when the model is read. The message now
+  says so, that a dose amount may be a formula of parameters, and that a delay to be estimated
+  is a lag time (`lag A = tlag`).
+
 ## [0.7.0] — 2026-11-07
 
 ### Added

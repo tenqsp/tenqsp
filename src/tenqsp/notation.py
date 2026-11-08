@@ -294,16 +294,18 @@ class _ProblemAt(_Problem):
 
 
 # ----------------------------------------------------------------------------- values
-def _number(text: str, what: str) -> float:
-    """A number, possibly written as arithmetic of numbers (``4/100``, ``-1e-9``)."""
+def _number(text: str, what: str, hint: str | None = None) -> float:
+    """A number, possibly written as arithmetic of numbers (``4/100``, ``-1e-9``). ``hint``:
+    what to do instead when a name is written (by default, name a formula)."""
     try:
         v = parse_formula(text, {})
     except FormulaError as e:
         if "Unknown name" in str(e):
-            raise _Problem(
-                f"{what} must be a number, not '{text}'. To compute a value from other "
-                f"parameters, name a formula instead (e.g. 'ktr = 4/mtt')."
-            ) from None
+            hint = hint or (
+                "To compute a value from other parameters, name a formula instead (e.g. "
+                "'ktr = 4/mtt')."
+            )
+            raise _Problem(f"{what} must be a number, not '{text}'. {hint}") from None
         raise _Problem(f"{what}: {e}") from None
     try:
         out = float(v)
@@ -1554,9 +1556,14 @@ class _Reader:
             )
         target_text, times_text, amounts_text = m.groups()
         target, where = self.end(target_text)
+        hint = (
+            "Dose times are fixed when the model is read; a dose amount may be a formula of "
+            f"parameters. For a delay to be estimated, give a lag time: 'lag {target} = tlag' "
+            "with 'param tlag = …' (every dose into the target arrives tlag later)."
+        )
         r = re.fullmatch(r"(.+?)\s+to\s+(.+?)\s+every\s+(.+)", times_text)
         if r:
-            t0, t1, step = (_number(x, "dose time") for x in r.groups())
+            t0, t1, step = (_number(x, "dose time", hint) for x in r.groups())
             if step <= 0:
                 raise _Problem("the interval after 'every' must be > 0.")
             k = (t1 - t0) / step
@@ -1567,7 +1574,7 @@ class _Reader:
                 )
             times = [t0 + i * step for i in range(round(k) + 1)]
         else:
-            times = [_number(x, "dose time") for x in _split_top(times_text)]
+            times = [_number(x, "dose time", hint) for x in _split_top(times_text)]
         texts = _split_top(amounts_text)
         if len(texts) not in (1, len(times)):
             raise _Problem(
