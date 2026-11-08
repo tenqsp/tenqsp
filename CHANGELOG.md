@@ -5,6 +5,14 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- **One entry of a parameter table in a formula:** `Vvas[organ=spleen]` is the spleen's value,
+  usable anywhere a number is; over several axes each axis is given once, by name (it still
+  varies) or fixed by label: `iKp[phage, organ=liver]`. Python: `Vvas.at(organ="spleen")`.
+  The entry is the parameter itself, so values given when solving reach it; a model no longer
+  needs a second copy of a table's value. The model file format (IR) is version 0.11; files of
+  earlier versions still load.
+
 ### Fixed
 - A dose time written as a name (`dose A at t=Tdose: D1`) was refused with the advice to name a
   formula, which cannot help: dose times are fixed when the model is read. The message now

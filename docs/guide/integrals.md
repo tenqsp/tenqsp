@@ -163,8 +163,14 @@ C(0) = 1
 observable C_liver = C[organ=liver]
 ```
 
+A **parameter table** is sliced the same way: `V[organ=liver]` is the liver's volume, one
+value, and `K[phage, organ=liver]` the liver's value for each phage (each axis of the table
+once, by name or by label). It reads the parameter itself, so a model needs no second copy of
+the number, and new values given when solving reach it. In Python: `V.at(organ="liver")`,
+which, unlike a field's slice, can be used inside a formula.
+
 !!! note
-    Reading a slice inside a formula is part of the notation; the Python API has no
+    Reading a slice of a field inside a formula is part of the notation; the Python API has no
     equivalent yet (`C.at(organ="liver")` is accepted by `m.observable`, `m.integral`,
     `m.dose` and the other calls that take a part of a field, but not inside a formula).
     Build such a model from text, or add the equation to a text model:

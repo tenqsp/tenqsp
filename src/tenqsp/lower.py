@@ -35,7 +35,17 @@ import jax.scipy.special as jss
 import numpy as np
 import sympy as sp
 
-from tenqsp.expr import SHAPE_CLASSES, Grad, NormCdf, Probit, Rem, Shape, end_key, parse
+from tenqsp.expr import (
+    SHAPE_CLASSES,
+    Grad,
+    NormCdf,
+    Probit,
+    Rem,
+    Shape,
+    end_key,
+    is_label,
+    parse,
+)
 from tenqsp.ir import ModelIR, ParamSpec
 
 # 3-point Gauss-Legendre on [-1, 1]: cell averages of initial values (exact to degree 5).
@@ -613,20 +623,40 @@ class Evaluator:
             val = jnp.sum(val, axis=d, keepdims=True)
         return val
 
-    def vector(self, base: str, index: tuple[str, ...]):
+    def vector(self, base: str, index: tuple):
+        """A parameter table read with its axes (``k[s]``) or with some categories fixed
+        (``iKp[phage, 'liver']``: the entries of that category, over the axes left)."""
         sl = self.plan.params.index[base]
-        if len(index) == 1:
-            return self.plan.frame.along(index[0], self.theta[sl])
         frame = self.plan.frame
-        table = jnp.reshape(self.theta[sl], tuple(frame.sizes[a] for a in index))
-        return frame.from_layout(table, index)
+        if not any(is_label(i) for i in index):
+            names = tuple(str(i) for i in index)
+            if len(names) == 1:
+                return frame.along(names[0], self.theta[sl])
+            table = jnp.reshape(self.theta[sl], tuple(frame.sizes[a] for a in names))
+            return frame.from_layout(table, names)
+        p = next(q for q in self.plan.ir.params if q.name == base)
+        over = (p.over,) if isinstance(p.over, str) else tuple(p.over)
+        table = jnp.reshape(self.theta[sl],
+                            tuple(len(self.plan.ir.axis(a).labels) for a in over))  # fmt: skip
+        left = []
+        for d in reversed(range(len(over))):  # from the last axis, so the others keep places
+            if is_label(index[d]):
+                k = self.plan.ir.axis(over[d]).labels.index(index[d].name)
+                table = jnp.take(table, k, axis=d)
+            else:
+                left.insert(0, over[d])
+        if not left:
+            return table
+        if len(left) == 1:
+            return frame.along(left[0], table)
+        return frame.from_layout(table, tuple(left))
 
     # -------------------------------------------------------------- tree walk
     def expr(self, e: sp.Basic):
         if isinstance(e, sp.Symbol):
             return self.name(e.name)
         if isinstance(e, sp.Indexed):
-            return self.vector(str(e.base), tuple(str(i) for i in e.indices))
+            return self.vector(str(e.base), tuple(e.indices))
         if e.is_Number:
             if e in (sp.oo, -sp.oo):
                 return jnp.inf if e == sp.oo else -jnp.inf

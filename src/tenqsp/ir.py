@@ -31,7 +31,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-IR_VERSION = "0.10"
+IR_VERSION = "0.11"
 # older versions this reader still accepts, with what changed since:
 #   0.1 -> 0.2: ExtinctionSpec gained noise_floor (default False)
 #   0.2 -> 0.3: ExtinctionSpec gained where (slices of fields; default: whole members)
@@ -55,8 +55,11 @@ IR_VERSION = "0.10"
 #               kind "flux" (the flux along the axis at that end equals ``value``, in which
 #               the field's own name means its value at that end), and formulas may read a
 #               field at one end of a continuous axis, ``at_end(F, z, lower)``
+#   0.10 -> 0.11: an entry of a parameter table in a formula (decided 2026-11-08): an index
+#               may be a quoted label in its axis's place, ``Vvas['spleen']``,
+#               ``iKp[phage, 'liver']`` (the notation's Vvas[organ=spleen])
 READABLE_VERSIONS = frozenset(
-    {"0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10"}
+    {"0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11"}
 )
 
 Where = tuple[tuple[str, str], ...]  # a slice: (axis, label) pairs fixing categories

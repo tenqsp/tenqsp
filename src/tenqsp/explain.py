@@ -37,7 +37,7 @@ import sympy as sp
 from sympy.printing.str import StrPrinter
 
 from .canonical import _same
-from .expr import SHAPES, FormulaError
+from .expr import SHAPES, FormulaError, index_axes
 from .expr import parse as _parse_formula
 from .ir import ModelIR
 from .lower import tables
@@ -139,7 +139,7 @@ class _Model:
         return False
 
     def _index_axes(self, ind: sp.Indexed) -> set[str]:
-        return {str(x) for x in ind.indices}
+        return set(index_axes(ind))
 
     def changes(self, text: str) -> list[str]:
         """What a formula's value changes with, besides parameters: time and model state."""
@@ -365,7 +365,9 @@ def explain(ir: ModelIR) -> str:
         out.append("")
         out.append("Checks")
         out += [f"  [{i.level}] {i.where}: {i.message}" for i in others]
-    return "\n".join(out) + "\n"
+    from .writer import _entries
+
+    return _entries("\n".join(out) + "\n", ir)
 
 
 def _size(ir: ModelIR) -> list[str]:

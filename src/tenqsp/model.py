@@ -569,10 +569,27 @@ class VectorParam:
             )
         return Formula(f"{self.name}[{self._index}]")
 
+    def at(self, **where) -> Formula:
+        """Some categories fixed: ``Vvas.at(organ="spleen")`` is the spleen's value;
+        ``iKp.at(organ="liver")`` the liver's value for each category of the other axes (used
+        where they run). The notation's ``Vvas[organ=spleen]``."""
+        want = self.over if isinstance(self.over, tuple) else (self.over,)
+        if not where:
+            raise FormulaError(f"{self.name}.at(...): fix at least one axis, e.g. "
+                               f"at({want[-1]}=...).")  # fmt: skip
+        for ax in where:
+            if ax not in want:
+                raise FormulaError(
+                    f"{self.name}.at({ax}=...): '{self.name}' has no axis '{ax}' (it has "
+                    f"{_which(self.over)})."
+                )
+        index = [repr(str(where[a])) if a in where else a for a in want]
+        return Formula(f"{self.name}[{', '.join(index)}]")
+
     def _misuse(self, *_):
         raise FormulaError(
             f"'{self.name}' has one value per category of {_which(self.over)}; "
-            f"write {self.name}[{self._index}]."
+            f"write {self.name}[{self._index}], or {self.name}.at(...) for some categories."
         )
 
     __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = _misuse

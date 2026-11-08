@@ -220,7 +220,9 @@ class _Printer:
                 pos = self(at)
             return rf"{name(f)}\big|_{{{name(ax)}={pos}}}", _ATOM
         if f == SLICE:
-            labels = [_label(k.value.value) for k in n.keywords]
+            labels = [  # an axis left free (a parameter table, k[phage, organ=liver])
+                name(k.arg) if k.value.value is None else _label(k.value.value) for k in n.keywords
+            ]
             return _sub(self.wrap(args[0], _ATOM), r",\,".join(labels)), _ATOM
         m = re.fullmatch(r"(d|int|sum|grad|trans)_(\w+)", f)
         if f.startswith("trans__"):

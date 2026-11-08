@@ -1070,8 +1070,8 @@ extinction group. Labels in quotes keep their quotes: `B[s="wild type"]`. Python
 [One category in a formula](../guide/integrals.md#one-category-in-a-formula-slices).
 
 ```text
-'C[o=a, s]': a slice fixes axes by label, e.g. C[organ=liver]; every entry needs axis=label.
-'A' is a compartment; only a field can be sliced.
+'C': a slice of a field fixes axes by label, e.g. C[organ=liver]; every entry needs axis=label (an axis by name alone is for a parameter table, k[phage, organ=liver]).
+'A' is a compartment; only a field or a parameter table (param k[axis]) can be sliced.
 'B' has no axis 'y' (it has ['z']).
 ```
 
@@ -1082,8 +1082,28 @@ Square brackets **without** `=` index a parameter declared over categorical axes
 indices in the declared order.
 
 ```text
-'k' has one value per level of axis 's'; write 'k[s]', not 'k[r]'.
+'k' has one value per level of axis 's'; write 'k[s]', or fix categories by label ('k[s=S]'), not 'k[r]'.
 Only vector parameters can be indexed, 'B' is not one at column 1 of 'B[s]'.
+```
+
+### One entry of a parameter table `V[organ=spleen]`
+
+With `=`, the brackets of a parameter table fix categories by label, as for a field:
+`Vvas[organ=spleen]` is the spleen's entry, one value, usable in any formula (a named value,
+an equation, an observable, a value at time 0, a dose). Over several axes, give each axis of
+the table once: by name, and it still varies, or as `axis=label`, and it is fixed.
+`iKp[phage, organ=liver]` is the liver's value for each phage, used where the phage axis runs;
+`iKp[phage=p1, organ=liver]` is one value. Python: `Vvas.at(organ="spleen")`,
+`iKp.at(organ="liver")` (the axes not named keep varying).
+
+The entry is the parameter itself, not a copy: values given when solving
+(`params={"Vvas": {...}}`) reach it, and so do a fit's estimates. `Vvas[organ]` (by axis,
+every organ) and `Vvas[organ=spleen]` (by label, one organ) are different things.
+
+```text
+'Vvas[organ=spleem]': axis 'organ' has no category 'spleem' (it has liver, spleen, lung, kidney). Did you mean 'spleen'?
+'iKp[organ=liver]': 'phage' missing. 'iKp' has one value per category of 'phage', 'organ'; give each axis once, by name or fixed by label, e.g. iKp[phage, organ=liver].
+'Vvas[phage=p1]': 'Vvas' has no axis 'phage'. 'Vvas' has one value per category of 'organ'; give each axis once, by name or fixed by label, e.g. Vvas[organ=liver].
 ```
 
 ### `t`: time

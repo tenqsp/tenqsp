@@ -16,6 +16,7 @@ own in the notation are written with the notation's equivalent:
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterable
 
@@ -104,6 +105,31 @@ def _table(values: Iterable[float], labels: list[tuple[str, ...]]) -> str:
         if len(labels) == 2
         else "{" + ", ".join(inner) + "}"
     )
+
+
+def _entries(text: str, ir: ModelIR) -> str:
+    """Entries of parameter tables as the notation writes them: ``Vvas['spleen']`` ->
+    ``Vvas[organ=spleen]``, ``iKp[phage, 'liver']`` -> ``iKp[phage, organ=liver]``."""
+    tables = {
+        p.name: (p.over,) if isinstance(p.over, str) else tuple(p.over)
+        for p in ir.params
+        if p.over is not None
+    }
+
+    def one(m: re.Match) -> str:
+        axes = tables.get(m.group(1))
+        parts = [x.strip() for x in m.group(2).split(",")]
+        if axes is None or len(parts) != len(axes):
+            return m.group(0)
+        out = []
+        for ax, x in zip(axes, parts, strict=True):
+            if x[:1] in "'\"":
+                out.append(f"{ax}={_label(ast.literal_eval(x))}")
+            else:
+                out.append(x)
+        return f"{m.group(1)}[{', '.join(out)}]"
+
+    return re.sub(r"\b([A-Za-z_]\w*)\[([^\[\]]*['\"][^\[\]]*)\]", one, text)
 
 
 def to_text(ir: ModelIR) -> str:
@@ -328,7 +354,7 @@ def to_text(ir: ModelIR) -> str:
         members = ", ".join(f"{m}{_where(e.member_where(i))}" for i, m in enumerate(e.group))
         floor = " with noise_floor" if e.noise_floor else ""
         out.append(f"extinction {e.name}: {members} below {_num(e.threshold)}{floor}")
-    return "\n".join(out).rstrip() + "\n"
+    return _entries("\n".join(out).rstrip() + "\n", ir)
 
 
 def _flux_text(F: str, ax: str, terms) -> str:
