@@ -5,6 +5,8 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-09
+
 ### Added
 - **One entry of a parameter table in a formula:** `Vvas[organ=spleen]` is the spleen's value,
   usable anywhere a number is; over several axes each axis is given once, by name (it still
