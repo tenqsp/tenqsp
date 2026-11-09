@@ -197,3 +197,53 @@ def test_derivatives_through_the_lag_and_bioavailability(m):
     assert np.allclose(fwd, exact, rtol=1e-6, atol=1e-7)
     assert np.allclose(fwd, rev, rtol=1e-10, atol=1e-10)
     assert np.all(fwd[0] == 0)  # before the dose arrives nothing moves
+
+
+PER_LEVEL = (
+    "param k = 0.3, F[s] = {S: 2, R: 0.5}\n"
+    "axis s categorical [S, R]\n"
+    "field B(s)\n"
+    "d_t(B) = -k*B\n"
+    "bioavailability B = F[s]\n"
+)
+
+
+def test_a_bioavailability_may_differ_by_level_of_a_categorical_axis():
+    """``bioavailability B = F[s]``: each element's doses scaled by its own fraction (a
+    regimen into slices, as for two phages dosed at once); exact values, the ledger, the
+    derivative by each level, and a text round trip."""
+    m = tq.Model.from_text(PER_LEVEL, name="f")
+    reg = tq.bolus("B[s=S]", 10, times=[1]) + tq.bolus("B[s=R]", 4, times=[2])
+    for backend in ("scipy", "jax"):
+        sol = m.solve((0, 6), times=[3, 6], regimen=reg, backend=backend, ledger=True, **TIGHT)
+        assert [d[:3] for d in sol.doses] == [(1.0, "B", 20.0), (2.0, "B", 2.0)]
+        S, R = 20 * np.exp(-0.3 * (sol.t - 1)), 2 * np.exp(-0.3 * (sol.t - 2))
+        assert np.allclose(sol["B"], np.stack([S, R], 1), rtol=1e-8, atol=1e-12)
+        assert np.max(np.abs(sol.ledger.unexplained("B"))) < 1e-8 * sol.ledger.scale("B")
+    assert "doses into B: F[s] of each arrives" in m.explain()
+    assert differences(m.to_ir(), tq.Model.from_text(m.to_text()).to_ir()) == []
+
+    cm = m.compile()
+    rec = jax_replay.record(cm, (0, 6), times=[3, 6], regimen=reg, **TIGHT)
+    th = jnp.asarray(rec.run.th)
+    F = cm.params.index["F"]
+    J = np.asarray(jax.jacfwd(lambda x: jax_replay.replay(cm, rec, x))(th))[..., F]
+    t = np.array([3.0, 6.0])
+    S_dF, R_dF = 10 * np.exp(-0.3 * (t - 1)), 4 * np.exp(-0.3 * (t - 2))
+    sl = cm.layout.slices["B"]
+    S_row, R_row = J[:, sl.start], J[:, sl.start + 1]  # (times, levels of F)
+    assert np.allclose(S_row[:, 0], S_dF, rtol=1e-6) and np.allclose(S_row[:, 1], 0)
+    assert np.allclose(R_row[:, 1], R_dF, rtol=1e-6) and np.allclose(R_row[:, 0], 0)
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        (PER_LEVEL.replace("bioavailability B = F[s]", "lag B = F[s]"), "a lag is a single number"),
+        (PER_LEVEL.replace("{S: 2, R: 0.5}", "{S: 2, R: -0.5}"), ">= 0"),
+        (PER_LEVEL.replace("field B(s)", "compartment B"), "single number"),
+    ],
+)
+def test_a_bioavailability_varies_only_over_the_fields_categorical_axes(text, message):
+    with pytest.raises((tq.NotationError, ModelError), match=message):
+        tq.Model.from_text(text)

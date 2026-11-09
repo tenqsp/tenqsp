@@ -1442,8 +1442,9 @@ class _Checker:
                 self.forbid_state(a, w, "a dose amount")
 
     def check_arrivals(self) -> None:
-        """Lags and bioavailabilities: one per place (a field or compartment), each a single
-        number from parameters, >= 0."""
+        """Lags and bioavailabilities: one per place (a field or compartment), from
+        parameters, >= 0; a lag a single number, a bioavailability a number or one per level
+        of the field's categorical axes (``bioavailability C = F[phage]``)."""
         for kind, specs in (("lag", self.ir.lags), ("bioavailability", self.ir.bioavailabilities)):
             seen: set[str] = set()
             for x in specs:
@@ -1453,7 +1454,7 @@ class _Checker:
                 if x.target in seen:
                     self.add("error", w, f"'{x.target}' has more than one {kind}; give one.")
                 seen.add(x.target)
-                self.check_nonnegative(x.value, w, f"a {kind}")
+                self.check_nonnegative(x.value, w, f"a {kind}", self.arrival_axes(kind, x.target))
             dosed = {d.target for d in self.ir.doses}
             for x in specs:
                 if self.ir.doses and x.target not in dosed:
@@ -1463,9 +1464,18 @@ class _Checker:
                         "the model gives no doses there; it acts on a regimen's doses only.",
                     )
 
-    def check_nonnegative(self, text: str, where: str, desc: str) -> None:
-        """A lag or bioavailability: parameters only, a single number, >= 0."""
-        self.require_within(self.dims(text, where), (), where, desc)
+    def arrival_axes(self, kind: str, target: str) -> tuple[str, ...]:
+        """The axes a lag (none) or a bioavailability (the field's categorical ones) may vary
+        over."""
+        if kind != "bioavailability":
+            return ()
+        axes = self.field_axes.get(target, ())
+        return tuple(a for a in axes if self.axis_type.get(a) == "categorical")
+
+    def check_nonnegative(self, text: str, where: str, desc: str, axes=()) -> None:
+        """A lag or bioavailability: parameters only, >= 0; a single number, or one per level
+        of ``axes``."""
+        self.require_within(self.dims(text, where), tuple(axes), where, desc)
         self.forbid_state(text, where, desc)
         expr = self.parse(text, where)
         if expr is None:
@@ -1749,7 +1759,9 @@ def validate_values(ir: ModelIR) -> None:
             c.check_one_way(t, f"advection of '{t.target}' along '{t.axis}'")
     for kind, specs in (("lag", ir.lags), ("bioavailability", ir.bioavailabilities)):
         for x in specs:
-            c.check_nonnegative(x.value, f"{kind} of '{x.target}'", f"a {kind}")
+            c.check_nonnegative(
+                x.value, f"{kind} of '{x.target}'", f"a {kind}", c.arrival_axes(kind, x.target)
+            )
     errors = [i for i in c.issues if i.level == "error"]
     if errors:
         raise ModelError(errors)
