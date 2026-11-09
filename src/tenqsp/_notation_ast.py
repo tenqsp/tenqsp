@@ -44,11 +44,18 @@ def prepare(text: str) -> str:
     def slice_(m: re.Match) -> str:
         items = []
         for part in m.group(2).split(","):
-            if "=" not in part:
-                raise NotationSyntaxError(
-                    f"'{m.group(0)}': a slice fixes axes by label, e.g. C[organ=liver]; every "
-                    "entry needs axis=label."
-                )
+            if "=" not in part:  # an axis left free: iKp[phage, organ=liver] (a table only)
+                if not re.fullmatch(_NAME, part.strip()):
+                    raise NotationSyntaxError(
+                        f"'{m.group(0)}': a slice fixes axes by label, e.g. C[organ=liver]; "
+                        f"'{part.strip()}' is not axis=label."
+                    )
+                if any(i.split("=", 1)[0] == part.strip() for i in items):
+                    raise NotationSyntaxError(
+                        f"'{m.group(0)}': the axis '{part.strip()}' is given twice."
+                    )
+                items.append(f"{part.strip()}=None")
+                continue
             ax, lab = part.split("=", 1)
             if not re.fullmatch(_NAME, ax.strip()):
                 raise NotationSyntaxError(f"'{m.group(0)}': '{ax.strip()}' is not an axis name.")
@@ -86,11 +93,18 @@ def call_name(node: ast.AST) -> str | None:
 
 
 def slice_of(node: ast.AST) -> tuple[str, tuple[tuple[str, str], ...]] | None:
-    """``__slice__(C, organ="liver")`` -> ("C", (("organ", "liver"),))."""
+    """``__slice__(C, organ="liver")`` -> ("C", (("organ", "liver"),)); an axis left free
+    (``iKp[phage, organ=liver]``, a parameter table) has the label None."""
     if call_name(node) != SLICE:
         return None
     field = node.args[0].id
     return field, tuple((k.arg, k.value.value) for k in node.keywords)
+
+
+FREE_IN_FIELD = (
+    "a slice of a field fixes axes by label, e.g. C[organ=liver]; every entry needs axis=label "
+    "(an axis by name alone is for a parameter table, k[phage, organ=liver])."
+)
 
 
 def slice_text(field: str, where) -> str:

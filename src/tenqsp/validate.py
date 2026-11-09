@@ -27,6 +27,7 @@ vary at all; integrate first.
 
 from __future__ import annotations
 
+import difflib
 import keyword
 import math
 from dataclasses import dataclass
@@ -35,7 +36,16 @@ from typing import Literal
 import numpy as np
 import sympy as sp
 
-from tenqsp.expr import CONSTANTS, FormulaError, end_key, grads_used, parse, shapes_used
+from tenqsp.expr import (
+    CONSTANTS,
+    FormulaError,
+    end_key,
+    grads_used,
+    index_axes,
+    is_label,
+    parse,
+    shapes_used,
+)
 from tenqsp.expr import NON_SMOOTH_TYPES as NON_SMOOTH
 from tenqsp.ir import (
     BOUNDARY_KINDS,
@@ -281,19 +291,15 @@ class _Checker:
                 ok = False
         indexed = list(expr.atoms(sp.Indexed))
         for ind in indexed:
-            base, idx = str(ind.base), tuple(str(i) for i in ind.indices)
+            base = str(ind.base)
             self.used.add(base)
             want = self.vector_over.get(base)
             want_t = want if isinstance(want, tuple) else (want,)
-            if idx != want_t:
-                self.add(
-                    "error",
-                    where,
-                    f"'{base}' has one value per level of {_axes_text(want)}; "
-                    f"write '{base}[{', '.join(want_t)}]', not '{ind}'.",
-                )
+            problem = self.index_problem(base, ind.indices, want_t)
+            if problem:
+                self.add("error", where, problem)
                 ok = False
-            out.update(i for i in idx if i in self.axis_type)
+            out.update(index_axes(ind))
         # Swap each k[s] for a fresh placeholder (not a number: '1 - cost[s]' -> 0 would erase
         # the rest of a product) and keep only the model's own names.
         stand_in = {ind: sp.Dummy() for ind in indexed}
@@ -600,6 +606,36 @@ class _Checker:
                 self.add("error", where, f"must be > 0 everywhere (found {v:g}).")
                 return
 
+    def index_problem(self, base: str, idx, want: tuple[str, ...]) -> str | None:
+        """What is wrong with the index of a parameter table (each place: its axis, or one of
+        that axis's categories, ``iKp[phage, 'liver']``), or None."""
+        over = want if len(want) > 1 else want[0]
+        usage = (
+            f"'{base}' has one value per level of {_axes_text(over)}; "
+            f"write '{base}[{', '.join(want)}]', or fix categories by label "
+            f"('{base}[{want[-1]}={self.labels_of(want[-1])[0]}]')"
+        )
+        shown = f"{base}[{', '.join(str(i) for i in idx)}]"
+        if len(idx) != len(want):
+            return f"{usage}, not '{shown}'."
+        for i, ax in zip(idx, want, strict=True):
+            if is_label(i):
+                labels = self.labels_of(ax)
+                if i.name not in labels:
+                    near = difflib.get_close_matches(i.name, labels, n=1)
+                    hint = f" Did you mean '{near[0]}'?" if near else ""
+                    return (
+                        f"'{shown}': axis '{ax}' has no category '{i.name}' (it has "
+                        f"{', '.join(labels)}).{hint}"
+                    )
+            elif str(i) != ax:
+                return f"{usage}, not '{shown}'."
+        return None
+
+    def labels_of(self, axis: str) -> list[str]:
+        a = next((x for x in self.ir.axes if x.name == axis), None)
+        return list(a.labels) if a is not None and a.type == "categorical" else [""]
+
     def values_of(self, expr: sp.Expr) -> list[float]:
         """Every value a formula of numbers and parameters takes (empty if it uses
         anything else)."""
@@ -853,7 +889,7 @@ class _Checker:
     def _axes_and_state(self, expr: sp.Expr) -> tuple[frozenset[str], bool]:
         """Axes a parsed expression varies over, and whether it depends on the state or time
         (through definitions too). Assumes its names were already checked."""
-        axes: set[str] = {str(j) for i in expr.atoms(sp.Indexed) for j in i.indices}
+        axes: set[str] = {j for i in expr.atoms(sp.Indexed) for j in index_axes(i)}
         state = False
         todo = [s.name for s in expr.free_symbols if isinstance(s, sp.Symbol)]
         seen: set[str] = set()

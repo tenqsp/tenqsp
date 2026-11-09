@@ -52,6 +52,24 @@ def sigmoid(x):
     return 1 / (1 + sp.exp(-x))
 
 
+class Label(sp.Symbol):
+    """A category fixed in the index of a parameter table: the ``'spleen'`` of
+    ``Vvas['spleen']`` (the notation's ``Vvas[organ=spleen]``). Printed quoted, so a formula
+    prints back as it reads."""
+
+    def _sympystr(self, printer) -> str:
+        return repr(self.name)
+
+
+def is_label(x) -> bool:
+    return isinstance(x, Label)
+
+
+def index_axes(ind: sp.Indexed) -> tuple[str, ...]:
+    """The axes a parameter-table reference still runs over (its fixed labels left out)."""
+    return tuple(str(i) for i in ind.indices if not isinstance(i, Label))
+
+
 class _Special(sp.Function):
     """A special function kept unevaluated (SymPy would otherwise rewrite it, e.g.
     ``erfc(-x) -> 2 - erfc(x)``, losing precision in the tails). ``_scipy`` evaluates it on
@@ -483,8 +501,8 @@ def parse(text: str, names: Mapping[str, sp.Basic]) -> sp.Expr:
     if not src:
         raise FormulaError("Empty formula.")
     # ^ means power, as in many modelling languages. Python reads ^ as XOR, which binds more
-    # loosely than + - * /, so it is rewritten before parsing (the grammar has no strings, so
-    # every ^ is an operator).
+    # loosely than + - * /, so it is rewritten before parsing (the only strings are the labels
+    # of table entries, Vvas['spleen'], which hold no ^, so every ^ is an operator).
     src = src.replace("^", "**")
     try:
         tree = ast.parse(src, mode="eval")
@@ -672,7 +690,13 @@ def parse(text: str, names: Mapping[str, sp.Basic]) -> sp.Expr:
                     f"one {where(node)}."
                 )
             idx = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
-            return base[tuple(value(i) for i in idx)]
+            return base[
+                tuple(
+                    Label(i.value) if isinstance(i, ast.Constant) and isinstance(i.value, str)
+                    else value(i)
+                    for i in idx
+                )
+            ]  # fmt: skip
         raise FormulaError(
             f"'{ast.unparse(node)}' is not allowed in a formula {where(node)}. Use numbers, names, "
             "+ - * / ** (or ^), the allowed functions, vector[axis], and conditionals "

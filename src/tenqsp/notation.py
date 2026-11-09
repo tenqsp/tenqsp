@@ -19,6 +19,7 @@ the same ``ast`` allow-list walker (ADR 0002). Nothing here calls ``eval``.
 from __future__ import annotations
 
 import ast
+import difflib
 import math
 import re
 import textwrap
@@ -411,6 +412,8 @@ class _Lift(ast.NodeTransformer):
         if name == A.SLICE:
             self.changed = True
             field, where = A.slice_of(node)
+            if self.r.table_axes(field) is not None:  # an entry of a parameter table
+                return self.r.table_entry(field, where)
             return ast.Name(self.r.slice_value(field, where))
         for prefix in ("int", "sum"):
             if A.operator_axes(name, prefix):
@@ -464,7 +467,7 @@ class _Lift(ast.NodeTransformer):
             node = node.args[0]
         name = self.integral_name if top is self.r.top_integral else None
         sl = A.slice_of(node)
-        if sl:
+        if sl and self.r.table_axes(sl[0]) is None:
             target = self.r.m[sl[0]].at(**dict(sl[1]))
             return self.r.m.integral(target, over=axes, name=name).name
         inner = _Lift(self.r)
@@ -710,18 +713,64 @@ class _Reader:
         self.m._handles[name] = Name(name, "integral")
         return name
 
+    def table_axes(self, name: str) -> tuple[str, ...] | None:
+        """The axes of a parameter table (``param k[s]``), or None for any other name."""
+        for p in self.m._params:
+            if p.name == name and p.over is not None:
+                return (p.over,) if isinstance(p.over, str) else tuple(p.over)
+        return None
+
+    def table_entry(self, name: str, where) -> ast.Subscript:
+        """``Vvas[organ=spleen]``, ``iKp[phage, organ=liver]``: an entry (or the entries of a
+        category) of a parameter table, as the index ``Vvas['spleen']``, ``iKp[phage,
+        'liver']``. Each axis of the table once, by name (free) or by axis=label (fixed)."""
+        axes = self.table_axes(name)
+        given = dict(where)
+        written = f"{name}[{', '.join(a if lab is None else f'{a}={lab}' for a, lab in where)}]"
+        usage = (
+            f"'{name}' has one value per category of {', '.join(repr(a) for a in axes)}; give "
+            f"each axis once, by name or fixed by label, e.g. {name}["
+            + ", ".join([*axes[:-1], f"{axes[-1]}={self.m[axes[-1]].labels[0]}"])
+            + "]"
+        )
+        for ax in given:
+            if ax not in axes:
+                raise _Problem(f"'{written}': '{name}' has no axis '{ax}'. {usage}.")
+        missing = [a for a in axes if a not in given]
+        if missing:
+            raise _Problem(f"'{written}': {', '.join(repr(a) for a in missing)} missing. {usage}.")
+        index = []
+        for ax in axes:
+            lab = given[ax]
+            if lab is None:
+                index.append(ast.Name(ax))
+                continue
+            labels = list(self.m[ax].labels)
+            if lab not in labels:
+                near = difflib.get_close_matches(lab, labels, n=1)
+                hint = f" Did you mean '{near[0]}'?" if near else ""
+                raise _Problem(
+                    f"'{written}': axis '{ax}' has no category '{lab}' (it has "
+                    f"{', '.join(labels)}).{hint}"
+                )
+            index.append(ast.Constant(lab))
+        sl = index[0] if len(index) == 1 else ast.Tuple(index)
+        return ast.Subscript(value=ast.Name(name), slice=sl)
+
     def field_spec(self, name: str):
         for f in self.m._fields:
             if f.name == name:
                 return f
         what = self.m._kind.get(name)
         raise _Problem(
-            f"'{name}' is {'not declared' if what is None else 'a ' + what}; only a field can "
-            "be sliced."
+            f"'{name}' is {'not declared' if what is None else 'a ' + what}; only a field or a "
+            "parameter table (param k[axis]) can be sliced."
         )
 
     def check_where(self, field_name: str, where) -> None:
         spec = self.field_spec(field_name)
+        if any(lab is None for _, lab in where):
+            raise _Problem(f"'{field_name}': {A.FREE_IN_FIELD}")
         for ax, lab in where:
             if ax not in spec.axes:
                 raise _Problem(f"'{field_name}' has no axis '{ax}' (it has {list(spec.axes)}).")
@@ -947,7 +996,9 @@ class _Reader:
             text = " ".join(rest_lines)
         node = A.parse(text)
         sl = A.slice_of(node)
-        if sl:  # a named value on a slice: C_liver = C[organ=liver, sub=cellular]
+        if (
+            sl and self.table_axes(sl[0]) is None
+        ):  # a named value on a slice: C_liver = C[organ=liver]
             self.slice_value(*sl, name=name)
             self.where_lines[("definition", name)] = st
             self.where_lines[("integral", name)] = st
