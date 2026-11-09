@@ -420,8 +420,10 @@ class CompiledModel:
             ("bioavailability", frac, self.bioavailability_exprs),
         ):
             for sl, _, target in specs:
-                x = float(v[sl.start])
-                if not (np.isfinite(x) and x >= 0):
+                part = v[sl]
+                bad = ~(np.isfinite(part) & (part >= 0))
+                if bad.any():
+                    x = float(part[np.argmax(bad)])
                     raise ValueError(
                         f"The {what} of the doses into '{target}' is {x:g}; it must be a finite "
                         "number >= 0."
@@ -1971,8 +1973,9 @@ class CompiledModel:
         ev, _ = self._evaluator(0.0, jnp.zeros(n), theta, geom)
         for sl, e, _ in self.lag_exprs:
             lag = lag.at[sl].set(jnp.reshape(self._on(ev.expr(e), (), "a lag"), ()))
-        for sl, e, _ in self.bioavailability_exprs:
-            frac = frac.at[sl].set(jnp.reshape(self._on(ev.expr(e), (), "a bioavailability"), ()))
+        for sl, e, target in self.bioavailability_exprs:  # may vary over categorical axes
+            v = self._on(ev.expr(e), self.layout.axes[target], "a bioavailability")
+            frac = frac.at[sl].set(jnp.ravel(jnp.broadcast_to(v, self.layout.shapes[target])))
         return lag, frac
 
     def _obs_impl(self, t, y, theta, geom):

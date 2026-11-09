@@ -352,6 +352,22 @@ More about lags and F:
   ([Gradients and sensitivities](gradients.md)).
 - A lag or F below 0 is an error when the model is run. F above 1 is allowed.
 - One lag and one bioavailability per place.
+- Into a field over a categorical axis, the bioavailability may differ by level: one value
+  per level of the axis, written with the axis name. Two phages dosed into their own slices
+  of a plasma field, each with its own F:
+
+    ```tq
+    axis phage categorical [a, b]
+    param F[phage] = {a: 2, b: 0.5}
+    field C(phage)
+    bioavailability C = F[phage]
+    ```
+
+    ```python
+    reg = tq.bolus("C[phage=a]", 10, times=[2]) + tq.bolus("C[phage=b]", 10, times=[2])
+    ```
+
+    arrives as 20 into `C[phage=a]` and 5 into `C[phage=b]`. A lag is one number per place.
 
 ## What was given: `sol.doses` and `sol.infusions`
 

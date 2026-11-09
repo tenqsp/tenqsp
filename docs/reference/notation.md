@@ -767,7 +767,8 @@ lag: 'P' already has a lag; give one per place.
 
 **Meaning** Only the fraction *formula* of every dose into the place arrives, as NONMEM's
 F: bolus amounts and infusion rates are scaled; the ledger books the rest as "not
-absorbed". A formula of parameters, ≥ 0 (above 1 is allowed).
+absorbed". A formula of parameters, ≥ 0 (above 1 is allowed). Into a field over a
+categorical axis, the fraction may differ by level: `bioavailability C = F[phage]`.
 
 **Example**
 

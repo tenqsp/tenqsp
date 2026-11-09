@@ -5,6 +5,12 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- **A bioavailability that differs by level:** into a field over a categorical axis, the
+  fraction of each dose that arrives may be one value per level, `bioavailability C =
+  F[phage]` (two phages dosed into their own slices of `C`, each scaled by its own F). It
+  can be differentiated by each level, as before. A lag is still one number per place.
+
 ## [0.8.0] — 2026-11-09
 
 ### Added
