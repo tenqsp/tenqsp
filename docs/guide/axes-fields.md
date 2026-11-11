@@ -97,6 +97,73 @@ print(r.centers[:3])                  # the cell centres, finest near 0
 In notation the geometric axis is `axis r in [0, 1] n=10 spacing=geometric ratio=1.2`.
 `m.to_text()` writes an axis with uneven cells as its list of faces.
 
+### Spheres and cylinders: an axis that is a radius
+
+A tumour spheroid, a bead or a cell aggregate is a sphere; a blood vessel with the tissue
+around it is a cylinder. When the model is the same at every point at a given distance from
+the centre, that distance is the only axis needed. Declare it with `geometry=spherical` (or
+`geometry=cylindrical`):
+
+=== "Notation"
+
+    ```tq
+    model spheroid_penetration
+    axis r in [0, 300] n=30 geometry=spherical units=um   # distance from the centre
+    param D=6000, k=0.6, Cb=1
+    field C(r) units=mg/L
+    d_t(C) = d_r(D*d_r(C)) - k*C
+        at r=300: C = Cb                                  # the surface, held at Cb
+    observable amount = int_r(C)
+    ```
+
+=== "Python"
+
+    ```python
+    m = tq.Model("spheroid_penetration")
+    r = m.axis("r", 0, 300, 30, geometry="spherical", units="um")
+    D, k, Cb = m.params(D=6000, k=0.6, Cb=1)
+    C = m.field("C", axes=[r], units="mg/L")
+    m.diffuse(C, axis=r, D=D)
+    m.hazard(C, k)
+    m.at(C, r=300, value=Cb)
+    m.observable("amount", m.integral(C, over=r))
+    ```
+
+What changes on such an axis:
+
+- **The cells are shells.** A field is a density per unit volume (a concentration), and
+  `int_r(C)` is the amount in the whole sphere, ∫ C·4πr² dr. For a cylinder the volumes are
+  per unit length (∫ C·2πr dr).
+- **Transport and diffusion cross surfaces that grow with r.** Written as in a paper, the
+  diffusion above is (1/r²)·∂/∂r(r²·D·∂C/∂r), and a flow at velocity v is
+  −(1/r²)·∂/∂r(r²·v·C). The rule to remember: *the area goes inside the derivative, the
+  volume divides outside*. The area of the surface at radius r is 4πr² for a sphere and 2πr
+  for a cylinder, so the power of r is 2 and 1 (and 0 for a flat axis, where there is nothing
+  to add). Reactions and losses (`-k*C`) are written as on a flat axis. TenQSP adds the r²
+  for you: `d_r(...)` on a spherical axis means the divergence through the shells, and
+  `m.to_latex()` and `m.explain()` write it out in full.
+- **The written-out form is accepted too.** `1/r^2*d_r(r^2*D*d_r(C))` is read as the same
+  term as `d_r(D*d_r(C))`, so a model can be written exactly as in its paper. On a flat axis
+  that form is refused with a hint to declare the geometry, so the two can never disagree. A
+  diffusivity that grows with r, `d_r(r^2*D*d_r(C))` (no 1/r² in front), is a model of its
+  own and is accepted on any axis.
+- **The centre takes no condition.** At r = 0 the surface has no area, so nothing crosses it;
+  a condition written there is refused. An axis that starts above 0 (a hollow sphere, the
+  tissue outside a vessel) has an inner surface and takes a condition at both ends.
+- **A flux condition is per unit area**, as on a flat axis. A compartment that exchanges with
+  the surface writes the area itself, `4*pi*R^2*h*(C(r=R) - Cp)`, and the
+  [conservation ledger](explain.md) shows whether the two sides agree.
+- **Shapes set the shape of the concentration.** `C(0) = A*uniform(r)` puts the amount A in
+  the sphere at the same concentration everywhere; `A*point(r, at=50)` puts it all in the
+  shell around r = 50.
+
+```python
+print(r.volumes.sum())                # 4/3*pi*300^3: the volume of the sphere
+print(r.areas[[0, -1]])               # 0 at the centre, 4*pi*300^2 at the surface
+sol = m.solve((0, 10), times=[10])
+print(sol["amount"])                  # the amount of drug in the spheroid
+```
+
 ## Categorical axes
 
 A categorical axis is a list of named categories: `axis s categorical [S, R]`. There is no

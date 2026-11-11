@@ -681,5 +681,6 @@ def _coords(ir) -> dict[str, dict]:
                 "units": a.units,
                 "values": 0.5 * (f[1:] + f[:-1]),
                 "faces": f,
+                "geometry": a.geometry,
             }
     return out

@@ -57,6 +57,8 @@ from tenqsp.ir import (
 
 Level = Literal["error", "warning", "note"]
 AXIS_KINDS = ("one_way", "bidirectional", "spatial")
+GEOMETRIES = ("planar", "cylindrical", "spherical")
+_SHAPE = {"cylindrical": "cylinder", "spherical": "sphere"}
 
 
 @dataclass(frozen=True)
@@ -527,6 +529,15 @@ class _Checker:
                     self.add("error", w, "faces must be strictly increasing.")
                 if a.kind not in AXIS_KINDS:
                     self.add("error", w, f"kind must be one of {', '.join(AXIS_KINDS)}.")
+                if a.geometry not in GEOMETRIES:
+                    self.add("error", w, f"geometry must be one of {', '.join(GEOMETRIES)}.")
+                elif a.geometry != "planar" and f.size and f[0] < 0:
+                    self.add(
+                        "error",
+                        w,
+                        f"a {a.geometry} axis is a radius, so it starts at 0 or above, "
+                        f"not at {f[0]:g}.",
+                    )
                 if a.labels:
                     self.add("error", w, "a continuous axis has no labels.")
             elif a.type == "categorical":
@@ -536,6 +547,8 @@ class _Checker:
                     self.add("error", w, "labels must be unique.")
                 if a.faces:
                     self.add("error", w, "a categorical axis has no faces.")
+                if a.geometry != "planar":
+                    self.add("error", w, "a categorical axis has no geometry.")
             else:
                 self.add("error", w, "type must be 'continuous' or 'categorical'.")
 
@@ -1102,6 +1115,22 @@ class _Checker:
                 continue
             if b.kind not in BOUNDARY_KINDS:
                 self.add("error", w, f"kind must be one of {', '.join(BOUNDARY_KINDS)}.")
+                continue
+            ax = self.ir.axis(b.axis)
+            if (
+                ax.geometry != "planar"
+                and b.side == "lower"
+                and ax.faces
+                and ax.faces[0] == 0
+                and b.kind != "zero_flux"
+            ):
+                self.add(
+                    "error",
+                    w,
+                    f"{b.axis}=0 is the centre of the {_SHAPE[ax.geometry]}: "
+                    "it has no surface, so nothing crosses it and it takes no condition. Leave "
+                    "this line out.",
+                )
                 continue
             key = (b.target, b.axis, b.side)
             if key in seen:

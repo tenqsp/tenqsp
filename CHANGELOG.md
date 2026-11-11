@@ -18,6 +18,14 @@ versioning; `0.x` releases may change the API.
   `explain()` and `to_latex()` show the formulas. Such models used to be refused; a model
   with neither an equation nor an observable still is. See the guide's "Models given by
   formulas".
+- **Spheres and cylinders:** `axis r in [0, R] n=… geometry=spherical` (or `cylindrical`)
+  makes the axis a radius. Its cells are shells, a field over it is a density per unit volume,
+  `d_r(…)` is the divergence through the shells, (1/r²)∂r(r²…), and `int_r` counts their
+  volumes, so totals and the ledger are amounts. The divergence may also be written out as in
+  a paper, `1/r^2*d_r(r^2*D*d_r(C))`; on a flat axis that form is refused with a hint to
+  declare the geometry. The centre takes no condition. `to_latex()` writes the full form and
+  `explain()` says what the geometry changes. Model files are IR version 0.12 (older files
+  still load). See the guide's "Spheres and cylinders".
 
 ## [0.8.0] — 2026-11-09
 

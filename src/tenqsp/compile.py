@@ -49,6 +49,7 @@ import scipy.sparse as sps
 import sympy as sp
 
 from tenqsp.expr import end_key
+from tenqsp.grids import GEOMETRY_POWER
 from tenqsp.ir import BoundarySpec, ModelIR, TermSpec
 from tenqsp.lower import (
     GAUSS_NODES,
@@ -301,6 +302,8 @@ class CompiledModel:
         self.layout = StateLayout.of(ir, plan.frame.sizes)
         self.params = plan.params
         self.geom = jax.tree_util.tree_map(jnp.asarray, geometry(ir))
+        # axes that are a radius (cylindrical, spherical): fluxes along them are per unit area
+        self.radial = {a.name: a.geometry != "planar" for a in ir.axes if a.type == "continuous"}
         # sizes of categories (field weights) and compartment volumes: formulas of parameters
         self.sizes: dict[str, sp.Expr] = {
             f.name: plan.parse(f.weights) for f in ir.fields if f.weights is not None
@@ -1138,8 +1141,8 @@ class CompiledModel:
 
     # ------------------------------------------------------------------ extinction groups
     def _cell_widths(self) -> np.ndarray:
-        """Per state: the product of its cell widths along continuous axes (1 for categories
-        and compartments)."""
+        """Per state: the product of its cell volumes along continuous axes (the widths, on a
+        planar axis; 1 for categories and compartments)."""
         w = np.ones(self.layout.size)
         for f in self.ir.fields:
             axes = self.layout.axes[f.name]
@@ -1148,7 +1151,7 @@ class CompiledModel:
                 if self.plan.frame.types[ax] == "continuous":
                     shape = [1] * len(axes)
                     shape[i] = -1
-                    cell = cell * np.reshape(np.asarray(self.geom[ax]["widths"]), shape)
+                    cell = cell * np.reshape(np.asarray(self.geom[ax]["volumes"]), shape)
             w[self.layout.slices[f.name]] = cell.ravel()
         return w
 
@@ -1577,6 +1580,8 @@ class CompiledModel:
             F = flux[side]
             # amounts: weights never vary along a continuous axis, so drop that dimension
             w_rest = size if np.ndim(size) == 0 else jnp.take(size, 0, axis=dim)
+            if self.radial.get(ax):  # per unit area: the amount crosses the end's area
+                w_rest = w_rest * g["areas"][0 if side == "lower" else -1]
             if b.kind != "zero_flux" and book is not None:
                 into = F if side == "lower" else -F
                 book[self._end_keys[(name, ax, side)]] = self._total(into * w_rest, rest_axes, geom)
@@ -1590,15 +1595,18 @@ class CompiledModel:
                 )
 
         faces = assemble_faces(flux["lower"], F_int, flux["upper"], dim)
+        if self.radial.get(ax):  # a radius: fluxes per unit area through shells' faces
+            return divergence(faces, g["volumes"], dim, areas=g["areas"])
         return divergence(faces, g["widths"], dim)
 
     def _total(self, x, axes: tuple[str, ...], geom):
-        """Amount in ``x`` over ``axes``: widths on continuous axes, plain sums on categories."""
+        """Amount in ``x`` over ``axes``: cell volumes on continuous axes (the widths, on a
+        planar axis), plain sums on categories."""
         for i, ax in enumerate(axes):
             if self.plan.frame.types[ax] == "continuous":
                 shape = [1] * len(axes)
                 shape[i] = -1
-                x = x * jnp.reshape(geom[ax]["widths"], shape)
+                x = x * jnp.reshape(geom[ax]["volumes"], shape)
         return jnp.sum(x)
 
     # ------------------------------------------------------------------ sparse Jacobian
@@ -1937,8 +1945,13 @@ class CompiledModel:
             coords, w = {}, 1.0
             for ax, k in zip(axes, combo, strict=True):
                 g = geom[ax]
-                coords[ax] = frame.along(ax, g["centers"] + GAUSS_NODES[k] * 0.5 * g["widths"])
-                w *= GAUSS_WEIGHTS[k]
+                at = g["centers"] + GAUSS_NODES[k] * 0.5 * g["widths"]
+                coords[ax] = frame.along(ax, at)
+                w = w * GAUSS_WEIGHTS[k]
+                power = GEOMETRY_POWER[self.ir.axis(ax).geometry]
+                if power:  # a radius: a shell's average weights by its area, r^power
+                    shell = jnp.diff(g["faces"] ** (power + 1)) / (power + 1)
+                    w = w * frame.along(ax, at**power * g["widths"] / shell)
             out = out + w * ev.with_coords(coords).expr(e)
         return out
 

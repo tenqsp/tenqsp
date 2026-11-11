@@ -49,6 +49,56 @@ _AT = re.compile(rf"at\s+({_NAME})\s*=\s*([^:]+?)\s*:\s*(.*)$", re.S)
 _FIT_LINE = re.compile(rf"fit(\s+{_NAME})?")
 
 
+def _is_power_of(node: ast.expr, ax: str) -> int | None:
+    """1 for ``r``, 2 for ``r^2`` (``ax`` the axis), None otherwise."""
+    if isinstance(node, ast.Name) and node.id == ax:
+        return 1
+    if (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Pow)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == ax
+        and isinstance(node.right, ast.Constant)
+        and node.right.value == 2
+    ):
+        return 2
+    return None
+
+
+def _shell_divergence(term: ast.expr):
+    """``(d_r(X) call, r, k)`` when ``term`` is ``1/r^k*d_r(r^k*X)`` or ``d_r(r^k*X)/r^k``
+    (k = 1 or 2), else None."""
+    if not isinstance(term, ast.BinOp):
+        return None
+    if isinstance(term.op, ast.Div):
+        pairs = [(term.left, term.right)]
+    elif isinstance(term.op, ast.Mult):
+        pairs = [
+            (call, other.right)
+            for call, other in ((term.right, term.left), (term.left, term.right))
+            if isinstance(other, ast.BinOp)
+            and isinstance(other.op, ast.Div)
+            and isinstance(other.left, ast.Constant)
+            and other.left.value == 1
+        ]
+    else:
+        return None
+    for call, den in pairs:
+        name = A.call_name(call)
+        axes = name and A.operator_axes(name, "d")
+        if not axes or len(call.args) != 1 or call.keywords:
+            continue
+        ax = axes[0]
+        k = _is_power_of(den, ax)
+        if k is None:
+            continue
+        inner = A.remove_factor(call.args[0], lambda n, ax=ax, k=k: _is_power_of(n, ax) == k)
+        if inner is None:
+            continue
+        return ast.Call(func=call.func, args=[inner], keywords=[]), ax, k
+    return None
+
+
 class NotationError(ModelError):
     """A model text cannot be read. The message lists every problem with its line."""
 
@@ -833,15 +883,15 @@ class _Reader:
             raise _Problem("an axis needs a name: axis a in [0, 2] n=40.")
         name, rest = m.group(1), m.group(2)
         if rest.startswith("categorical"):
-            head, opts = _options(rest[len("categorical") :], ("units",))
+            head, opts = _options(rest[len("categorical") :], ("units", "geometry"))
             labels = _labels_list(head, f"axis '{name}'")
             self.m.axis(name, labels=labels, **opts)
             if self.cells and name in self.cells:
                 raise _Problem(f"cells= changes continuous axes; '{name}' is categorical.")
             self.where_lines[("axis", name)] = st
             return
-        head, opts = _options(rest, ("n", "units", "kind", "spacing", "ratio", "faces"))
-        kw: dict = {k: opts[k] for k in ("units", "kind", "spacing") if k in opts}
+        head, opts = _options(rest, ("n", "units", "kind", "spacing", "ratio", "faces", "geometry"))
+        kw: dict = {k: opts[k] for k in ("units", "kind", "spacing", "geometry") if k in opts}
         if "ratio" in opts:
             kw["ratio"] = _number(opts["ratio"], f"axis '{name}', ratio")
         n = None
@@ -1153,6 +1203,7 @@ class _Reader:
         h = self.handle(F, where)
         moved: set[str] = set()
         for sign, term in items:
+            term = self.shell_form(term)
             name = A.call_name(term)
             d_axes = name and A.operator_axes(name, "d")
             t_axes = name and A.operator_axes(name, "trans")
@@ -1186,6 +1237,33 @@ class _Reader:
                 )
         elif sharp_axes is not None and not moved:
             raise _Problem("'using sharp' is for an equation with a transport term -d_a(v*F).")
+
+    def shell_form(self, term: ast.expr) -> ast.expr:
+        """The divergence through shells written out, ``1/r^2*d_r(r^2*X)`` (or
+        ``d_r(r^2*X)/r^2``; ``r`` for a cylinder), read as ``d_r(X)`` on an axis of that
+        geometry; refused, with the way out, on an axis of another."""
+        found = _shell_divergence(term)
+        if found is None:
+            return term
+        call, ax, k = found
+        geometry = {a.name: a.geometry for a in self.m._axes}.get(ax)
+        if geometry is None:
+            return term  # not an axis: the usual messages follow
+        want = {1: "cylindrical", 2: "spherical"}[k]
+        rk = ax if k == 1 else f"{ax}^2"
+        if geometry == want:
+            return call
+        if geometry == "planar":
+            raise _Problem(
+                f"1/{rk}*d_{ax}({rk}*…) is the {want} form of d_{ax}(…): declare "
+                f"geometry={want} on axis '{ax}' (axis {ax} in [0, R] n=… geometry={want}); "
+                f"on it, d_{ax}(…) alone means the same."
+            )
+        have = "r" if geometry == "cylindrical" else "r^2"
+        raise _Problem(
+            f"axis '{ax}' is {geometry}: its divergence written out is "
+            f"1/{have.replace('r', ax)}*d_{ax}({have.replace('r', ax)}*…), or d_{ax}(…) alone."
+        )
 
     def transport(self, st, F, where, sign, term, ax, sharp_axes) -> str:
         if where:

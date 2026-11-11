@@ -81,7 +81,8 @@ class Solution:
 
         Each field is a variable over ``("t", *its axes)``, each compartment over ``("t",)``,
         each observable over ``("t", *the axes it varies over)``. Continuous axes carry their
-        cell centres as coordinates (attributes: ``kind``, ``units``, ``faces``) and a
+        cell centres as coordinates (attributes: ``kind``, ``units``, ``faces``, and
+        ``geometry`` for a radius) and a
         ``<axis>_width`` coordinate (the widths are also in the axis attribute ``widths``, and
         the coordinate is left out if the model uses that name); categorical axes carry their
         labels. Field values are densities (or concentrations for weighted fields), exactly as
@@ -102,10 +103,12 @@ class Solution:
             else:
                 faces = np.asarray(info["faces"])
                 widths = np.diff(faces)
+                geometry = info.get("geometry", "planar")
                 coords[ax] = (
                     ax,
                     np.asarray(info["values"]),
-                    {**attrs, "faces": faces, "widths": widths},
+                    {**attrs, "faces": faces, "widths": widths}
+                    | ({} if geometry == "planar" else {"geometry": geometry}),
                 )
                 if f"{ax}_width" not in self:
                     coords[f"{ax}_width"] = (ax, widths, {"units": info["units"]})

@@ -46,6 +46,7 @@ from tenqsp.expr import (
     is_label,
     parse,
 )
+from tenqsp.grids import measures
 from tenqsp.ir import ModelIR, ParamSpec
 
 # 3-point Gauss-Legendre on [-1, 1]: cell averages of initial values (exact to degree 5).
@@ -170,13 +171,23 @@ class Frame:
 
 
 def geometry(ir: ModelIR) -> dict[str, dict[str, np.ndarray]]:
-    """Faces, centres and widths of every continuous axis (passed to the compiled functions as
-    runtime inputs, so they are not baked into the compiled code as constants)."""
+    """Faces, centres, widths, face areas and cell volumes of every continuous axis (passed
+    to the compiled functions as runtime inputs, so they are not baked into the compiled code
+    as constants). On a planar axis the areas are 1 and the volumes the widths; on a radius
+    (cylindrical, spherical) they come from the geometry, and every amount, total and
+    divergence uses them."""
     out = {}
     for a in ir.axes:
         if a.type == "continuous":
             f = np.asarray(a.faces, dtype=np.float64)
-            out[a.name] = {"faces": f, "centers": 0.5 * (f[1:] + f[:-1]), "widths": np.diff(f)}
+            areas, volumes = measures(f, a.geometry)
+            out[a.name] = {
+                "faces": f,
+                "centers": 0.5 * (f[1:] + f[:-1]),
+                "widths": np.diff(f),
+                "areas": areas,
+                "volumes": volumes,
+            }
     return out
 
 
@@ -368,11 +379,14 @@ def _shape_cdf(name: str, x, params):
     raise CompileError(f"unknown shape '{name}'")  # pragma: no cover
 
 
-def shape_density(name: str, faces, params, ax: int, *, raw: bool = False):
+def shape_density(name: str, faces, params, ax: int, *, raw: bool = False, volumes=None):
     """Cell-average density of a shape on one axis, normalised to integrate to 1 over it.
 
     ``faces`` has the ``n + 1`` faces on dimension ``ax`` and size 1 elsewhere; ``params``
-    broadcast against it. Returns an array with ``n`` along that dimension.
+    broadcast against it. Returns an array with ``n`` along that dimension. ``volumes`` (the
+    cell volumes, shaped as the result) are for an axis that is a radius: the shape is then
+    the shape of the density (uniform: the same concentration in every shell), scaled so its
+    amount over the shells' volumes is 1.
 
     ``raw=True`` gives the curve itself (a probability density, not rescaled after the axis
     cuts it), for a shape inside a density formula, ``density(normal(z, ...))``. ``point``
@@ -401,6 +415,9 @@ def shape_density(name: str, faces, params, ax: int, *, raw: bool = False):
             finite = jnp.isfinite(length)
             return mass / jnp.where(finite, length, total) / widths
         return mass / widths
+    if volumes is not None:
+        curve = mass / widths
+        return curve / jnp.sum(curve * volumes, axis=ax, keepdims=True)
     return mass / total / widths
 
 
@@ -619,7 +636,7 @@ class Evaluator:
             if val.shape[d] == 1:  # constant along this axis: integrate a broadcast copy
                 val = jnp.broadcast_to(val, (*val.shape[:d], frame.sizes[ax], *val.shape[d + 1 :]))
             if frame.types[ax] == "continuous":
-                val = val * frame.along(ax, self.geom[ax]["widths"])
+                val = val * frame.along(ax, self.geom[ax]["volumes"])
             val = jnp.sum(val, axis=d, keepdims=True)
         return val
 
@@ -760,8 +777,12 @@ class Evaluator:
             )
         ax = coord.name
         faces = self.plan.frame.along(ax, self.geom[ax]["faces"])
+        radius = self.plan.ir.axis(ax).geometry != "planar"
+        volumes = self.plan.frame.along(ax, self.geom[ax]["volumes"]) if radius else None
         params = [self.centers_only().expr(p) for p in e.args[1:]]
-        return shape_density(name, faces, params, self.plan.frame.pos(ax), raw=self.raw_shapes)
+        return shape_density(
+            name, faces, params, self.plan.frame.pos(ax), raw=self.raw_shapes, volumes=volumes
+        )
 
 
 _RELATIONS: dict[type, Callable] = {
