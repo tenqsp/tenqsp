@@ -158,6 +158,8 @@ class StateLayout:
         return {n: jnp.reshape(y[self.slices[n]], self.shapes[n]) for n in self.names}
 
     def pack(self, parts: Mapping[str, object]):
+        if not self.names:  # a model given by formulas
+            return jnp.zeros(0)
         return jnp.concatenate(
             [jnp.reshape(jnp.broadcast_to(parts[n], self.shapes[n]), (-1,)) for n in self.names]
         )

@@ -84,6 +84,7 @@ nav:
       - Totals, integrals and ends: guide/integrals.md
       - Starting values: guide/initial.md
       - Doses and regimens: guide/doses.md
+      - Models given by formulas: guide/formulas.md
       - Simulation and exploration: guide/simulation.md
       - Gradients and sensitivities: guide/gradients.md
       - Reading a model back: guide/explain.md

@@ -273,6 +273,8 @@ def diffusion_slope(ir: ModelIR, D: str, axis: str) -> str:
 def explain(ir: ModelIR) -> str:
     """The model in plain language: every term with its scheme, boundaries, starting values,
     doses, extinction groups and numerical safeguards."""
+    if sum(ir.state_count().values()) == 0:
+        return _explain_formulas(ir)
     M = _Model(ir)
     report = validate(ir, raise_on_error=False)
     out: list[str] = []
@@ -368,6 +370,26 @@ def explain(ir: ModelIR) -> str:
     from .writer import _entries
 
     return _entries("\n".join(out) + "\n", ir)
+
+
+def _explain_formulas(ir: ModelIR) -> str:
+    """A model with no states: its outputs are formulas of t."""
+    report = validate(ir, raise_on_error=False)
+    out = [f"Model '{ir.name}': no states, given by formulas of t"]
+    if report.errors:
+        out.append("")
+        out.append("ERRORS (the model cannot be solved until they are fixed):")
+        out += [f"  - {i.where}: {i.message}" for i in report.errors]
+    out.append("")
+    out.append("Outputs")
+    out += [f"  {o.name} = {o.expr}" for o in ir.observables]
+    out.append("")
+    out += [
+        "Each output is its formula evaluated at the output times: no differential equations,",
+        "so no solver. Tolerances (rtol, atol) are accepted and change nothing. No value is",
+        "clipped, capped or floored.",
+    ]
+    return "\n".join(out) + "\n"
 
 
 def _size(ir: ModelIR) -> list[str]:

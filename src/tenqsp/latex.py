@@ -308,6 +308,7 @@ def to_latex(ir: ModelIR) -> str:
 
     eqs, defs, bounds, starts = [], [], [], []
     whole = {m.group(1) for s in stmts if (m := re.match(r"d_t\((\w+)\)", s))}
+    formulas = not any(s.startswith("d_t(") for s in stmts)  # outputs are formulas of t
     last = None  # the field whose equation conditions "at z=…" stand under
     for s in stmts:
         word = s.split(None, 1)[0]
@@ -328,6 +329,10 @@ def to_latex(ir: ModelIR) -> str:
             last = re.match(r"d_t\((\w+)", s).group(1)
         if re.match(r"(lag|bioavailability)\s+\w+\s*=", s):
             continue  # about the doses, which latex leaves out
+        if formulas and word == "observable":  # a model given by formulas: its outputs
+            lhs, rhs = _split(s[len("observable") :].strip())
+            eqs.append(rf"{name(lhs)}(t) &= {P(parse(rhs))}")
+            continue
         if word in (
             "model",
             "axis",

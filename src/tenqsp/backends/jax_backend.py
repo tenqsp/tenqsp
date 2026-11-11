@@ -119,6 +119,15 @@ def solve(
     ``solve``, plus ``max_steps`` (per segment). There is
     no Radau fallback inside JAX: a failure raises ``SolverError`` naming where, and
     suggesting ``backend="scipy"``."""
+    if cm.n_states == 0:  # a model given by formulas of t: the scipy path, which runs no solver
+        from tenqsp.backends.scipy_backend import solve as scipy_solve
+
+        sol = scipy_solve(
+            cm, t_span, times=times, params=params, theta=theta, method=method, rtol=rtol,
+            atol=atol, max_step=max_step, ledger=ledger, regimen=regimen, initial=initial,
+        )  # fmt: skip
+        sol.options["backend"] = "jax"
+        return sol
     run = _prepare(
         cm, t_span, times, params, theta, method, rtol, atol, max_step, ledger, regimen, initial,
         max_steps=max_steps,

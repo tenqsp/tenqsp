@@ -360,6 +360,8 @@ def _run_of(sim, cm, sc):
 def _probe(cm, run, data, x0, derivatives) -> int:
     """Run once at ``x0``: a scenario that does not run at all is an error here. Returns the
     steps the run took (what sizes the record, for reverse derivatives)."""
+    if cm.n_states == 0:  # a model given by formulas: nothing to run
+        return 0
     steer = derivatives == "reverse"
     probe = jb._program(cm, ledger=False, model_doses=run.model_doses, steer=steer)
     args, dot = _inputs(jnp.asarray(x0), data, run.model_doses)
@@ -370,6 +372,8 @@ def _probe(cm, run, data, x0, derivatives) -> int:
 
 def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int):
     """The jitted program and the record's capacity (0 without a record)."""
+    if cm.n_states == 0:
+        return _formula_program(cm, model_doses, outputs, bool(derivatives)), 0
     if derivatives == "forward":  # sensitivities carried along the run: no record
         return _sens_program(cm, model_doses, outputs, p), 0
     if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
@@ -905,6 +909,25 @@ def _forward_program(cm, model_doses: bool, outputs):
         status = out["status"]
         ys = out["ys"] * jnp.where(status == OK, 1.0, jnp.nan)
         return outputs_of(args["theta"], ys, data["t_out"]), status, out["most_steps"]
+
+    jitted = jax.jit(impl)
+    cm._lazy[key] = jitted
+    return jitted
+
+
+def _formula_program(cm, model_doses: bool, outputs, derivatives: bool):
+    """``impl(x, data) -> ({output: (T, ...)}, status, 0)`` for a model with no states (its
+    outputs are formulas of t): the formulas at the output times, no solver."""
+    key = ("formula_function", model_doses, tuple(outputs), derivatives)
+    if key in cm._lazy:
+        return cm._lazy[key]
+    outputs_of = _outputs_of(cm, outputs)
+
+    def impl(x, data):
+        args, _ = _inputs(x if derivatives else _no_derivatives(x), data, model_doses)
+        t_out = data["t_out"]
+        ys = jnp.zeros((t_out.shape[0], 0))
+        return outputs_of(args["theta"], ys, t_out), jnp.asarray(OK), jnp.asarray(0)
 
     jitted = jax.jit(impl)
     cm._lazy[key] = jitted

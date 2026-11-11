@@ -10,6 +10,14 @@ versioning; `0.x` releases may change the API.
   fraction of each dose that arrives may be one value per level, `bioavailability C =
   F[phage]` (two phages dosed into their own slices of `C`, each scaled by its own F). It
   can be differentiated by each level, as before. A lag is still one number per place.
+- **Models given by formulas** (NONMEM's `$PRED`): a model with no differential equations,
+  its outputs written as formulas of `t`, `observable E = E0 + prog*t`. It is evaluated at the
+  output times with no solver: `m.solve`, `sim.function` (exact derivatives, `jit`, `vmap`),
+  batches and sensitivities work as for other models. A dose enters the formula as a parameter;
+  doses, starting values, lags and extinction groups are refused with a message saying so.
+  `explain()` and `to_latex()` show the formulas. Such models used to be refused; a model
+  with neither an equation nor an observable still is. See the guide's "Models given by
+  formulas".
 
 ## [0.8.0] — 2026-11-09
 

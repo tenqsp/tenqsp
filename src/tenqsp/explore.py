@@ -513,6 +513,11 @@ def pre_run(sim, scenario=None, *, until="steady", t_max: float = 1e6) -> PreRun
     if not (isinstance(t_max, (int, float)) and t_max > 0):
         raise ValueError(f"t_max must be a number > 0, not {t_max!r}.")
     cm = sim.model.compile()
+    if cm.n_states == 0:
+        raise ValueError(
+            f"'{cm.ir.name}' has no states (it is given by formulas of t), so there is no state "
+            "to run ahead to."
+        )
     t0 = 0.0 if sc.start is None else sc.start
     start = sc.initial_vector(cm)
     if isinstance(until, (int, float)) and not isinstance(until, bool):
