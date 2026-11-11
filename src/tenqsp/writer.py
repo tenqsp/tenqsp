@@ -151,7 +151,8 @@ def to_text(ir: ModelIR) -> str:
         else:
             rng = "faces=[" + ", ".join(repr(float(f)) for f in a.faces) + "]"
         kind = "" if a.kind == "bidirectional" else f" kind={a.kind}"
-        out.append(f"axis {a.name} {rng}{kind}" + _opt("units", a.units))
+        geometry = "" if a.geometry == "planar" else f" geometry={a.geometry}"
+        out.append(f"axis {a.name} {rng}{kind}{geometry}" + _opt("units", a.units))
     if ir.axes:
         out.append("")
 

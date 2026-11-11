@@ -37,8 +37,15 @@ def assemble_faces(lower, interior, upper, dim: int):
     return from_front(jnp.concatenate([lo, interior_f, up], axis=0), dim)
 
 
-def divergence(face_flux, widths: np.ndarray, dim: int):
-    """Rate of change of cell averages from face fluxes: ``-(F[i+1] - F[i]) / width[i]``."""
+def divergence(face_flux, widths: np.ndarray, dim: int, areas: np.ndarray | None = None):
+    """Rate of change of cell averages from face fluxes: ``-(F[i+1] - F[i]) / width[i]``.
+
+    With ``areas`` (one per face) the fluxes are per unit area of faces of those areas, and
+    ``widths`` are the cell volumes: ``-(A[i+1]*F[i+1] - A[i]*F[i]) / volume[i]`` (a radius:
+    cylindrical or spherical shells).
+    """
     F = to_front(face_flux, dim)
     w = jnp.asarray(widths).reshape((-1,) + (1,) * (F.ndim - 1))
+    if areas is not None:
+        F = F * jnp.asarray(areas).reshape((-1,) + (1,) * (F.ndim - 1))
     return from_front(-(F[1:] - F[:-1]) / w, dim)

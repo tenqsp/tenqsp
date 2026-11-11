@@ -130,8 +130,8 @@ the model is named twice.
 **Syntax**
 
 ```text
-axis name in [lower, upper] n=cells [kind=…] [spacing=geometric ratio=r] [units=u]
-axis name faces=[f0, f1, …, fn] [kind=…] [units=u]
+axis name in [lower, upper] n=cells [kind=…] [geometry=…] [spacing=geometric ratio=r] [units=u]
+axis name faces=[f0, f1, …, fn] [kind=…] [geometry=…] [units=u]
 ```
 
 **Meaning** A range cut into `n` cells (or into the cells between the given `faces`). The
@@ -141,6 +141,7 @@ options:
 |---|---|---|
 | `n` | whole number ≥ 1 | number of cells |
 | `kind` | `bidirectional` (default), `one_way`, `spatial` | how material may move: `one_way` only toward larger values (age, maturation; its upper end must be stated), `spatial` documents a position |
+| `geometry` | `planar` (default), `spherical`, `cylindrical` | `spherical` or `cylindrical`: the axis is a radius (lower end ≥ 0); its cells are shells, `d_r(…)` is the divergence through them, (1/r²)∂r(r²…) or (1/r)∂r(r…), and `int_r` counts the shells' volumes; see [Spheres and cylinders](../guide/axes-fields.md#spheres-and-cylinders-an-axis-that-is-a-radius) |
 | `spacing` | `uniform` (default), `geometric` | geometric cells grow by the factor `ratio` from one cell to the next |
 | `ratio` | number | with `spacing=geometric` |
 | `faces` | `[numbers]` | the cell boundaries themselves, instead of `in [ ] n=` |
@@ -155,9 +156,10 @@ See [Continuous axes](../guide/axes-fields.md#continuous-axes) and
 axis a in [0, 2] n=40 units=h kind=one_way
 axis x in [0, 1] n=30 spacing=geometric ratio=1.1
 axis d faces=[0, 0.1, 0.5, 1]
+axis r in [0, 300] n=30 geometry=spherical units=um
 ```
 
-**Python** `m.axis("a", 0, 2, 40, units="h", kind="one_way")`;
+**Python** `m.axis("a", 0, 2, 40, units="h", kind="one_way")`; `m.axis("r", 0, 300, 30, geometry="spherical")`;
 `m.axis("x", 0, 1, 30, spacing="geometric", ratio=1.1)`; `m.axis("d", faces=[0, 0.1, 0.5, 1])`
 
 **Errors**
@@ -167,8 +169,10 @@ axis 'a': give the number of cells, n=….
 axis 'a': n is a number of cells (a whole number >= 1).
 axis 'a': the range is [lower, upper].
 axis 'a': write 'axis a in [lower, upper] n=cells', 'axis a faces=[...]' or 'axis a categorical [A, B]'.
-unknown option 'knd='; did you mean 'kind='? The options here are n=, units=, kind=, spacing=, ratio=, faces=.
+unknown option 'knd='; did you mean 'kind='? The options here are n=, units=, kind=, spacing=, ratio=, faces=, geometry=.
 Axis 'a': kind must be one of one_way, bidirectional, spatial, not 'oneway'.
+Axis 'r': geometry must be one of planar, cylindrical, spherical, not 'sphere'.
+Axis 'r': a spherical axis is a radius, so it starts at 0 or above, not at -1.
 Axis 'a': spacing must be 'uniform' or 'geometric', not 'log'.
 Axis 'a': spacing='geometric' needs ratio=.
 axis 'a': faces=[...] gives 2 cells but n=3; leave out n= (the faces decide it).
@@ -982,9 +986,17 @@ inside a formula. Each term of `d_t(F) = …` is recognised as follows:
 Transport plus diffusion along the same axis is a Fokker–Planck equation; see
 [Transport plus diffusion](../guide/terms.md#transport-plus-diffusion-a-fokkerplanck-equation).
 
+On an axis declared `geometry=spherical`, each `d_r(…)` term is the divergence through
+shells, (1/r²)∂r(r²…), and may also be written out that way: `1/r^2*d_r(r^2*D*d_r(F))` is the
+same term as `d_r(D*d_r(F))` (`1/r*d_r(r*…)` for `geometry=cylindrical`). See
+[Spheres and cylinders](../guide/axes-fields.md#spheres-and-cylinders-an-axis-that-is-a-radius).
+
 Errors:
 
 ```text
+1/r^2*d_r(r^2*…) is the spherical form of d_r(…): declare geometry=spherical on axis 'r' (axis r in [0, R] n=… geometry=spherical); on it, d_r(…) alone means the same.
+axis 'r' is cylindrical: its divergence written out is 1/r*d_r(r*…), or d_r(…) alone.
+r=0 is the centre of the sphere: it has no surface, so nothing crosses it and it takes no condition. Leave this line out.
 the transport term must be in conservation form: write -d_a(v*I), not -v*d_a(I) (TenQSP keeps every cell's books balanced only in this form).
 transport is written with a minus, -d_a(v*I); to move toward lower a, give a negative velocity: -d_a(-v*I).
 diffusion is written +d_z(D*d_z(F)); a negative diffusion has no solution.
@@ -998,8 +1010,10 @@ write diffusion as d_z(D*d_z(I)), with the diffusivity D.
 `int_z(f)` integrates the formula `f` over the continuous axis `z`; `sum_s(f)` adds it up
 over the categorical axis `s`. Nest them for several axes: `int_z(sum_s(B))`. The result
 varies over the remaining axes. Each becomes a named total (the same integral written twice
-is stored once); for a field with weights the total is an amount. They may stand in any
-formula. See [Integrals and sums](../guide/integrals.md#integrals-and-sums).
+is stored once); for a field with weights the total is an amount. On a radius
+(`geometry=spherical`) `int_r` counts the shells' volumes, ∫ f·4πr² dr (∫ f·2πr dr for a
+cylinder). They may stand in any formula. See
+[Integrals and sums](../guide/integrals.md#integrals-and-sums).
 
 Python: `m.integral(B, over=[z, s])`.
 

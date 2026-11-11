@@ -405,6 +405,9 @@ def _size(ir: ModelIR) -> list[str]:
     if ir.compartments:
         names = ", ".join(c.name for c in ir.compartments)
         lines.append(f"  compartments: {len(ir.compartments)} ({names})")
+    for a in ir.axes:
+        if a.type == "continuous" and a.geometry != "planar":
+            lines += _wrap(_radius(a), "  ")
     declared = [p.name for p in ir.params if p.value is None]
     if declared:
         lines += _wrap(
@@ -503,14 +506,17 @@ def _field(M: _Model, name: str) -> list[str]:
         else:
             for t in adv:
                 out += _wrap(_transport(M, name, t), "    ")
+        radial = M.axes[ax].geometry != "planar"
         for t in dif:
             out += _wrap(
                 f"diffusion along {ax}, D = {t.expr}: second-order central differences in "
-                "flux form; where D varies, the face value is the harmonic mean of the two "
+                "flux form"
+                + (", through the shells' faces (flux times face area)" if radial else "")
+                + "; where D varies, the face value is the harmonic mean of the two "
                 "cells (a cell with D = 0 blocks the flux).",
                 "    ",
             )
-        if adv and dif:
+        if adv and dif and not radial:
             out += _wrap(_fokker_planck(M, ax, adv, dif), "    ")
     if not terms:
         out.append("    no terms: the field stays as it starts (doses aside).")
@@ -530,8 +536,40 @@ def _moves(M: _Model, name: str) -> str:
     return ", ".join(f"{cat(a)} -> {cat(b)} at {r}" for a, b, r in tr.rates)
 
 
+_RADIUS = {
+    "cylindrical": ("cylinder", "r", "2*pi*r", "per unit length"),
+    "spherical": ("sphere", "r^2", "4*pi*r^2", ""),
+}
+
+
+def _radius(a) -> str:
+    """What a radius (a cylindrical or spherical axis) changes, in words."""
+    shape, rk, area, per = _RADIUS[a.geometry]
+    rk = rk.replace("r", a.name)
+    area = area.replace("r", a.name)
+    return (
+        f"axis {a.name} is the radius of a {shape} ({a.geometry}): its cells are shells and a "
+        f"field over it is a density per unit volume{' ' + per if per else ''}. Transport and "
+        f"diffusion along {a.name} cross a surface of area {area}, so d_{a.name}(F) means "
+        f"(1/{rk})*d_{a.name}({rk}*F), and int_{a.name} counts {area} d{a.name} (an amount)."
+    )
+
+
 def _transport(M: _Model, name: str, t) -> str:
     ax = M.axes[t.axis]
+    if ax.geometry != "planar":
+        head = f"transport along the radius {t.axis}, velocity {t.expr.strip()} ({t.scheme})"
+        scheme = (
+            "MUSCL with the van Leer limiter (a straight line in each shell, its slope limited)"
+            if t.scheme == "sharp"
+            else "first-order upwind (each face takes the value from the side the flow comes "
+            "from, so values stay positive)"
+        )
+        return (
+            f"{head}: {scheme}, through faces of area growing with {t.axis}: material moving "
+            "outward spreads over larger shells and its density falls, moving inward it "
+            "gathers. The amount is conserved. Not a transit chain: the shells differ in size."
+        )
     faces = np.asarray(ax.faces, dtype=float)
     widths = np.diff(faces)
     n = len(widths)
@@ -969,7 +1007,10 @@ def _boundaries(M: _Model) -> list[str]:
                 kind = b.kind if b else _default_end(M, f.name, ax, side)
                 where = f"{f.name} at {ax}={side} ({ax} = {at:g})"
                 default = "" if b else " (the default)"
-                if kind == "zero_flux":
+                centre = M.axes[ax].geometry != "planar" and side == "lower" and at == 0
+                if kind == "zero_flux" and centre:
+                    text = f"{where}: the centre, which has no surface: nothing crosses."
+                elif kind == "zero_flux":
                     text = f"{where}: sealed, nothing crosses{default}."
                 elif kind == "outflow":
                     to = f" into {b.to}" if b and b.to else ", leaving the model"

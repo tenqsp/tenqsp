@@ -19,6 +19,27 @@ import numpy as np
 
 AxisKind = Literal["one_way", "bidirectional", "spatial"]
 AXIS_KINDS: tuple[str, ...] = ("one_way", "bidirectional", "spatial")
+Geometry = Literal["planar", "cylindrical", "spherical"]
+GEOMETRIES: tuple[str, ...] = ("planar", "cylindrical", "spherical")
+# the power of r in the area of the surface at radius r: the cell volumes and face areas
+# follow (planar: per unit area; cylindrical: per unit length)
+GEOMETRY_POWER = {"planar": 0, "cylindrical": 1, "spherical": 2}
+_GEOMETRY_CONSTANT = {"planar": 1.0, "cylindrical": 2.0 * np.pi, "spherical": 4.0 * np.pi}
+
+
+def measures(faces, geometry: str = "planar") -> tuple[np.ndarray, np.ndarray]:
+    """Face areas (``n + 1``) and cell volumes (``n``) of an axis in a geometry.
+
+    Planar: areas 1 and volumes the widths. Cylindrical (``r`` a radius, per unit length):
+    areas ``2*pi*r`` and volumes ``pi*(r1^2 - r0^2)``. Spherical: areas ``4*pi*r^2`` and
+    volumes ``4/3*pi*(r1^3 - r0^3)``. The volumes are exact, so totals are amounts.
+    """
+    f = np.asarray(faces, dtype=np.float64)
+    k = GEOMETRY_POWER[geometry]
+    c = _GEOMETRY_CONSTANT[geometry]
+    if k == 0:
+        return np.ones_like(f), np.diff(f)
+    return c * f**k, c / (k + 1) * np.diff(f ** (k + 1))
 
 
 @dataclass(frozen=True, eq=False)
@@ -35,6 +56,10 @@ class ContinuousAxis:
     kind
         Semantic tag that sets defaults and validation: ``"one_way"``,
         ``"bidirectional"`` or ``"spatial"``.
+    geometry
+        ``"planar"`` (default), or ``"cylindrical"``/``"spherical"``: the axis is a radius,
+        a field is a density per unit volume, and transport and diffusion along it cross
+        surfaces whose area grows with it (see :func:`measures`).
     units
         Free-text units, for documentation and reports.
     """
@@ -43,6 +68,7 @@ class ContinuousAxis:
     faces: np.ndarray
     kind: AxisKind = "bidirectional"
     units: str = ""
+    geometry: Geometry = "planar"
     centers: np.ndarray = field(init=False, repr=False)
     widths: np.ndarray = field(init=False, repr=False)
 
@@ -58,6 +84,16 @@ class ContinuousAxis:
             raise ValueError(
                 f"Axis '{self.name}': kind must be one of {', '.join(AXIS_KINDS)}, "
                 f"not '{self.kind}'."
+            )
+        if self.geometry not in GEOMETRIES:
+            raise ValueError(
+                f"Axis '{self.name}': geometry must be one of {', '.join(GEOMETRIES)}, "
+                f"not '{self.geometry}'."
+            )
+        if self.geometry != "planar" and faces[0] < 0:
+            raise ValueError(
+                f"Axis '{self.name}': a {self.geometry} axis is a radius, so it starts at 0 or "
+                f"above, not at {faces[0]:g}."
             )
         faces.setflags(write=False)
         centers = 0.5 * (faces[1:] + faces[:-1])
@@ -79,11 +115,14 @@ class ContinuousAxis:
         *,
         kind: AxisKind = "bidirectional",
         units: str = "",
+        geometry: Geometry = "planar",
     ) -> ContinuousAxis:
         """``n`` equal cells between ``lower`` and ``upper``."""
         if n < 1:
             raise ValueError(f"Axis '{name}': n must be at least 1, not {n}.")
-        return cls(name, np.linspace(lower, upper, n + 1), kind=kind, units=units)
+        return cls(
+            name, np.linspace(lower, upper, n + 1), kind=kind, units=units, geometry=geometry
+        )
 
     @classmethod
     def geometric(
@@ -96,6 +135,7 @@ class ContinuousAxis:
         *,
         kind: AxisKind = "bidirectional",
         units: str = "",
+        geometry: Geometry = "planar",
     ) -> ContinuousAxis:
         """``n`` cells whose widths grow by ``ratio`` from one cell to the next.
 
@@ -107,7 +147,7 @@ class ContinuousAxis:
         w = w / w.sum() * (upper - lower)
         faces = lower + np.concatenate(([0.0], np.cumsum(w)))
         faces[-1] = upper  # exactly the end declared (the sum rounds in the last digit)
-        return cls(name, faces, kind=kind, units=units)
+        return cls(name, faces, kind=kind, units=units, geometry=geometry)
 
     # ------------------------------------------------------------------ properties
     @property
@@ -129,11 +169,22 @@ class ContinuousAxis:
         return np.diff(self.centers)
 
     @property
+    def volumes(self) -> np.ndarray:
+        """Cell volumes in the axis's geometry (the widths on a planar axis)."""
+        return measures(self.faces, self.geometry)[1]
+
+    @property
+    def areas(self) -> np.ndarray:
+        """Face areas in the axis's geometry (ones on a planar axis), length ``n + 1``."""
+        return measures(self.faces, self.geometry)[0]
+
+    @property
     def is_uniform(self) -> bool:
         return bool(np.allclose(self.widths, self.widths[0], rtol=1e-12, atol=0.0))
 
     def integral(self, values, axis: int = 0):
-        """Quadrature over this axis: ``sum(value * width)`` along array dimension ``axis``.
+        """Quadrature over this axis: ``sum(value * volume)`` along array dimension ``axis``
+        (the volumes are the widths on a planar axis).
 
         Exact for cell averages: it returns the total amount in the domain.
         """
@@ -141,13 +192,15 @@ class ContinuousAxis:
 
         shape = [1] * jnp.ndim(values)
         shape[axis] = self.n
-        return jnp.sum(values * jnp.asarray(self.widths).reshape(shape), axis=axis)
+        return jnp.sum(values * jnp.asarray(self.volumes).reshape(shape), axis=axis)
 
     def __repr__(self) -> str:
         grid = "uniform" if self.is_uniform else "nonuniform"
         return (
             f"ContinuousAxis('{self.name}', [{self.lower:g}, {self.upper:g}], n={self.n}, "
-            f"{grid}, kind='{self.kind}'{', units=' + repr(self.units) if self.units else ''})"
+            f"{grid}, kind='{self.kind}'"
+            f"{'' if self.geometry == 'planar' else ', geometry=' + repr(self.geometry)}"
+            f"{', units=' + repr(self.units) if self.units else ''})"
         )
 
 

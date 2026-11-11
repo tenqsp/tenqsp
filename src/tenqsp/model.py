@@ -501,6 +501,16 @@ class Axis:
     def widths(self) -> np.ndarray:
         return self._continuous().widths
 
+    @property
+    def volumes(self) -> np.ndarray:
+        """Cell volumes: the widths on a planar axis, shells on a radius."""
+        return self._continuous().volumes
+
+    @property
+    def areas(self) -> np.ndarray:
+        """Face areas: 1 on a planar axis, the shells' surfaces on a radius."""
+        return self._continuous().areas
+
     def _continuous(self) -> ContinuousAxis:
         if self.type != "continuous":
             raise AttributeError(f"'{self.name}' is a categorical axis.")
@@ -758,13 +768,16 @@ class Model:
         spacing: str = "uniform",
         ratio: float | None = None,
         labels: Sequence[str] | None = None,
+        geometry: str = "planar",
     ) -> Axis:
         """Add an axis.
 
         Continuous: ``m.axis("age", lower=0, upper=2, n=40, kind="one_way", units="h")``, or
         explicit cell boundaries with ``faces=[...]``, or ``spacing="geometric", ratio=...``.
         ``kind`` is ``"one_way"`` (moves only upward, e.g. age), ``"bidirectional"`` (default)
-        or ``"spatial"``.
+        or ``"spatial"``. ``geometry="spherical"`` (or ``"cylindrical"``) makes the axis a
+        radius: a field over it is a density per unit volume, ``d_r(...)`` is the divergence
+        through shells (``(1/r^2)*d_r(r^2*...)``) and totals are amounts in the sphere.
 
         Categorical: ``m.axis("s", labels=["S", "R"])``.
         """
@@ -777,6 +790,8 @@ class Model:
                 raise ValueError(f"Axis '{name}': a categorical axis has no kind {kind!r}.")
             if spacing != "uniform":
                 raise ValueError(f"Axis '{name}': a categorical axis has no spacing.")
+            if geometry != "planar":
+                raise ValueError(f"Axis '{name}': a categorical axis has no geometry.")
             grid = CategoricalAxis(name, tuple(labels))
             self._claim(name, "axis")
             self._axes.append(AxisSpec(name, "categorical", labels=tuple(grid.labels), units=units))
@@ -785,7 +800,9 @@ class Model:
             if faces is not None:
                 if any(v is not None for v in (lower, upper, n, ratio)):
                     raise ValueError(f"Axis '{name}': give faces, or lower/upper/n, not both.")
-                grid = ContinuousAxis(name, np.asarray(faces, float), kind=kind, units=units)
+                grid = ContinuousAxis(
+                    name, np.asarray(faces, float), kind=kind, units=units, geometry=geometry
+                )
             else:
                 if lower is None or upper is None or n is None:
                     raise ValueError(
@@ -795,12 +812,14 @@ class Model:
                 if spacing == "uniform":
                     if ratio is not None:
                         raise ValueError(f"Axis '{name}': ratio is for spacing='geometric'.")
-                    grid = ContinuousAxis.uniform(name, lower, upper, n, kind=kind, units=units)
+                    grid = ContinuousAxis.uniform(
+                        name, lower, upper, n, kind=kind, units=units, geometry=geometry
+                    )
                 elif spacing == "geometric":
                     if ratio is None:
                         raise ValueError(f"Axis '{name}': spacing='geometric' needs ratio=.")
                     grid = ContinuousAxis.geometric(
-                        name, lower, upper, n, ratio, kind=kind, units=units
+                        name, lower, upper, n, ratio, kind=kind, units=units, geometry=geometry
                     )
                 else:
                     raise ValueError(
@@ -814,6 +833,7 @@ class Model:
                     faces=tuple(float(f) for f in grid.faces),
                     kind=kind,
                     units=units,
+                    geometry=geometry,
                 )
             )
         h = Axis(name, grid)

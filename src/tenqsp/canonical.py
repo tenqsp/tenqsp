@@ -150,6 +150,7 @@ def _canon(ir: ModelIR) -> dict:
             a.kind if a.type == "continuous" else "",
             a.units,
             a.labels,
+            a.geometry,
         )
         for a in ir.axes
     }

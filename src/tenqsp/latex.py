@@ -234,14 +234,24 @@ class _Printer:
             if op == "d":
                 if isinstance(args[0], ast.Name):
                     return rf"\frac{{\partial {self(args[0])}}}{{\partial {x}}}", _ATOM
+                k = _POWER.get(getattr(self.axes.get(ax), "geometry", "planar"), 0)
+                if k:  # the divergence through shells, as a paper writes it
+                    rk = x if k == 1 else f"{x}^{{{k}}}"
+                    return (
+                        rf"\frac{{1}}{{{rk}}}\frac{{\partial}}{{\partial {x}}}"
+                        rf"\left({rk} {self.wrap(args[0], _MUL)}\right)",
+                        _MUL,
+                    )
                 return rf"\frac{{\partial}}{{\partial {x}}}\left({self(args[0])}\right)", _ATOM
             if op == "grad":
                 return rf"\frac{{\partial {self(args[0])}}}{{\partial {x}}}", _ATOM
             if op == "int":
                 a = self.axes.get(ax)
                 lo, hi = (number(a.faces[0]), number(a.faces[-1])) if a is not None else ("", "")
+                shell = {"cylindrical": rf"2\pi {x} \, ", "spherical": rf"4\pi {x}^{{2}} \, "}
+                area = shell.get(getattr(a, "geometry", "planar"), "")
                 return (
-                    rf"\int_{{{lo}}}^{{{hi}}} {self.wrap(args[0], _SUM)} \, \mathrm{{d}}{x}",
+                    rf"\int_{{{lo}}}^{{{hi}}} {area}{self.wrap(args[0], _SUM)} \, \mathrm{{d}}{x}",
                     _MUL,
                 )
             if op == "sum":
@@ -263,6 +273,9 @@ class _Printer:
         M = self(args[0])
         on = ",".join(name(a) for a in axes)
         return rf"\mathcal{{T}}^{{{M}}}_{{{on}}}\!\left[{self(args[1])}\right]"
+
+
+_POWER = {"planar": 0, "cylindrical": 1, "spherical": 2}
 
 
 def _lead_neg(n: ast.expr) -> ast.expr | None:

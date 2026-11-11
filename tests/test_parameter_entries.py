@@ -83,7 +83,7 @@ def test_written_and_explained_as_in_the_notation_and_read_back():
 def test_the_stored_form_and_its_version():
     ir = model().to_ir()
     d = json.loads(ir.to_json())
-    assert d["ir_version"] == "0.11"
+    assert d["ir_version"] == "0.12"
     assert "K[phage, 'spleen']" in json.dumps(d)
     assert type(ir).from_json(ir.to_json()) == ir
     # a model saved by the previous version still loads
