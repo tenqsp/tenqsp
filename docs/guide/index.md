@@ -13,6 +13,7 @@ either way can be written out as the other (`m.to_text()`, and `tq.Model.from_te
 | [Totals, integrals and ends](integrals.md) | sums and integrals over axes, a field read at an end, slices |
 | [Starting values](initial.md) | values at time 0: densities, amounts and shapes |
 | [Doses and regimens](doses.md) | doses in the model and regimens at simulation, lag and bioavailability |
+| [Models given by formulas](formulas.md) | models with no differential equations, outputs written as formulas of t (NONMEM's `$PRED`) |
 | [Simulation and exploration](simulation.md) | solving, scenarios, grids and batches, pre-runs and steady state, plots |
 | [Gradients and sensitivities](gradients.md) | derivatives with respect to parameters and dosing |
 | [Reading a model back](explain.md) | `explain()`, `diagnostics()`, the ledger, `to_text()`, `to_latex()` |

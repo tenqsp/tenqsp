@@ -1716,14 +1716,13 @@ def validate(ir: ModelIR, *, raise_on_error: bool = True) -> Report:
     c.check_usage()
     sizes = ir.state_count()
     total = sum(sizes.values())
-    if total == 0:
+    if total == 0 and not ir.observables:
         c.add(
             "error",
             "model",
-            "has no states: no equation d_t(...) for a compartment or a field. TenQSP solves "
-            "differential equations; a model given only by formulas of t (a closed-form "
-            "concentration, say) is not supported yet. Write at least one equation: d_t(X) = ... "
-            "in the notation, m.ode(X, ...) in Python.",
+            "has nothing to compute: no equation d_t(...) and no observable. A model given by "
+            "formulas of t needs at least one: observable E = E0 + prog*t in the notation, "
+            "m.observable('E', 'E0 + prog*t') in Python.",
         )
     if total > 100_000:
         biggest = max(sizes, key=sizes.get)

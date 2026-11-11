@@ -162,6 +162,8 @@ def solve(
     # a time given twice gets a row each (as on the JAX backend): solved once, then repeated
     t_out, t_rows = np.unique(t_out, return_inverse=True)
     n = cm.n_states
+    if n == 0:  # a model given by formulas of t: the formulas at the output times, no solver
+        return _formulas(cm, t_out[t_rows], th, method, rtol, atol, max_step, regimen, initial)
     n_q = len(cm.ledger_entries) if ledger else 0
     atol_states = np.asarray(atol, dtype=np.float64)
     if atol_states.ndim > 1 or atol_states.size not in (1, n) or np.any(atol_states <= 0):
@@ -435,6 +437,35 @@ def solve(
         "backend": "scipy",
         "rtol": rtol_given,
         "atol": user_atol,
+        "max_step": max_step,
+    }
+    return sol
+
+
+def _formulas(cm, t_out, th, method, rtol, atol, max_step, regimen, initial) -> Solution:
+    """A model with no states: its observables at the output times, with no solver (the
+    tolerances are kept in ``sol.options`` but change nothing)."""
+    if regimen is not None and (regimen.boluses or regimen.infusions):
+        raise ValueError(
+            f"'{cm.ir.name}' has no states, so a dose has nowhere to go. In a model given by "
+            "formulas, put the dose in a formula as a parameter (D, say); a fit sets it from a "
+            "data column (D = DOSE)."
+        )
+    if initial is not None and np.size(initial):
+        raise ValueError(f"'{cm.ir.name}' has no states, so it has no starting state to set.")
+    start = time.perf_counter()
+    if cm.plan.switch_slot is not None:
+        th[cm.plan.switch_slot] = np.nan  # conditions on time use each output time itself
+    th[cm.floor_slots] = np.nan
+    Y = np.zeros((t_out.size, 0))
+    stats = {"nfev": 0, "njev": 0, "nlu": 0, "segments": 0, "extinctions": 0}
+    stats["wall_seconds"] = time.perf_counter() - start
+    sol = _solution(cm, t_out, Y, th, method, stats, [], None, [])
+    sol.options = {
+        "method": method,
+        "backend": "scipy",
+        "rtol": rtol,
+        "atol": float(atol) if np.size(atol) == 1 else np.asarray(atol).copy(),
         "max_step": max_step,
     }
     return sol

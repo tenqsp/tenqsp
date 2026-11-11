@@ -9,18 +9,18 @@ import pytest
 
 import tenqsp as tq
 
-NO_STATES = "model algebraic_pk\nparam C0=10, kel=0.2\nobservable conc = C0*exp(-kel*t)\n"
 
-
-@pytest.mark.parametrize("text", [NO_STATES, "model empty\n", ""])
-def test_a_model_with_no_states_is_refused_in_plain_words(text):
-    with pytest.raises(tq.ModelError, match=r"has no states: no equation d_t\(\.\.\.\)"):
+@pytest.mark.parametrize("text", ["model empty\n", ""])
+def test_a_model_with_nothing_to_compute_is_refused_in_plain_words(text):
+    # a model with no states but an observable is a model given by formulas
+    # (test_formula_models.py); with neither, there is nothing to compute
+    with pytest.raises(tq.ModelError, match=r"has nothing to compute: no equation d_t\(\.\.\.\)"):
         tq.Model.from_text(text)
 
 
-def test_a_python_model_with_no_states_is_refused_in_plain_words():
+def test_a_python_model_with_nothing_to_compute_is_refused_in_plain_words():
     m = tq.Model("algebraic_pk")
-    with pytest.raises(tq.ModelError, match=r"m\.ode\(X, \.\.\.\) in Python"):
+    with pytest.raises(tq.ModelError, match=r"m\.observable\('E', 'E0 \+ prog\*t'\) in Python"):
         m.validate()
 
 

@@ -567,11 +567,36 @@ class _Reader:
             if text is not None:
                 self.guard(st, lambda st, t=target, x=text: self.m.ode(self.m[t], self.lift(x)))
         self.leftover_keys()
+        self.formula_model_hint(kinds)
         if not self.problems:
             self.check_model()
         if self.problems:
             raise NotationError(sorted(self.problems, key=_line_key))
         return self.m
+
+    def formula_model_hint(self, kinds) -> None:
+        """A model with no compartments or fields (given by formulas of t): a failed dose,
+        starting value, lag or extinction says what to do instead."""
+        if any(k in ("compartment", "field") for k in self.m._kind.values()):
+            return
+        lines = {
+            f"line {st.lines[0][0]}:"
+            for k in ("init", "dose", "arrival", "extinction")
+            for st in kinds.get(k, [])
+            if st in self.failed
+        }
+        hint = (
+            "\nThis model has no equations d_t(...), so nothing holds an amount: a model "
+            "given by formulas of t has no doses, starting values, lags or extinctions. Put a "
+            "dose in a formula as a parameter (D, say); a fit sets it from a data column "
+            "(D = DOSE)."
+        )
+        self.problems = [
+            p + hint
+            if p.split(" ", 2)[0] == "line" and " ".join(p.split(" ", 2)[:2]) in lines
+            else p
+            for p in self.problems
+        ]
 
     def guard(self, st: _Statement, handler) -> None:
         before = len(self.problems)
