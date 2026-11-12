@@ -32,8 +32,9 @@ solution along one direction of its parameters is carried too, and steers the st
 its own difference array, rescaled and updated with the state's; after each converged Newton
 solve its corrector (linear) is solved with the same factorised matrix, iterated as Newton
 is (no convergence: as a Newton failure); its error enters the error test and the order
-choice (the larger of the two norms, as CVODES with ``errconS``). So a solution at rest whose
-derivative is not cannot take steps too coarse for the derivative.
+choice (the larger of the two norms, as CVODES with ``errconS``), on the scale
+``atol + rtol (|s| + |y|)`` (``_sens_scale``). So a solution at rest whose derivative is not
+cannot take steps too coarse for the derivative.
 """
 
 from __future__ import annotations
@@ -166,6 +167,18 @@ DENSE = LinearSolver(
     solve=lambda F, b: jsl.lu_solve(F, b),
     empty=lambda J: jsl.lu_factor(jnp.eye(J.shape[0])),
 )
+
+
+def _sens_scale(atol_s, rtol, s, y, p):
+    """The error scale of the carried derivative ``s`` (``p`` directions side by side) at the
+    state ``y``: ``atol + rtol (|s| + |y|)``. Each direction moves its number in proportion to
+    its value, so ``s`` is in the state's units (the change for a 100 % change); it is asked
+    to be as accurate as the state itself (``rtol |y|``) and to ``rtol`` of its own size. The
+    ``rtol |y|`` term matters where a derivative starts from 0 while the state does not (just
+    after a dose, inside a field the dose reaches through its neighbours): its first steps
+    have an error estimate as large as itself, which ``atol + rtol |s|`` alone can only accept
+    if ``atol`` happens to be large."""
+    return atol_s + rtol * (jnp.abs(s) + jnp.tile(jnp.abs(y), p))
 
 
 def _rms(x):
@@ -514,7 +527,7 @@ def bdf(
         nfev = c.nfev + n_iter
         if carry_s:  # the derivative's corrector, with the same matrix (module docstring)
             s_predict, psi_s = predict(Ds, order)
-            scale_s = atol_s + rtol * jnp.abs(s_predict)
+            scale_s = _sens_scale(atol_s, rtol, s_predict, y_predict, p)
             conv_s, n_iter_s, s_new, ds = when(
                 converged,
                 lambda: _newton(
@@ -544,7 +557,7 @@ def bdf(
         scale_new = atol + rtol * jnp.abs(y_new)
         error_norm = _rms(error_const[order] * d / scale_new)
         if carry_s:
-            scale_s_new = atol_s + rtol * jnp.abs(s_new)
+            scale_s_new = _sens_scale(atol_s, rtol, s_new, y_new, p)
             error_norm = jnp.maximum(error_norm, _rms(error_const[order] * ds / scale_s_new))
         reject = converged & (error_norm > 1)
         accept = converged & ~reject

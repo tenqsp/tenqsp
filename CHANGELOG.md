@@ -27,6 +27,19 @@ versioning; `0.x` releases may change the API.
   `explain()` says what the geometry changes. Model files are IR version 0.12 (older files
   still load). See the guide's "Spheres and cylinders".
 
+### Fixed
+- **Derivatives with respect to a later dose, with a small `atol`:** `sim.function`,
+  `sim.sensitivity` and the steering of reverse derivatives failed ("required step size is
+  less than spacing between numbers") just after a dose that is not at the start, when
+  `atol` was small (about 1e-18 or below; seen in a tumour model that needs 1e-25). Inside a
+  field that the dose reaches through its neighbours, the derivative starts from 0 while the
+  state does not, and its first steps have an error estimate as large as itself; its error
+  scale was `atol + rtol |derivative|`, which then accepts no step. The derivative is now asked
+  to be as accurate as the state itself as well, `atol + rtol (|derivative| + |state|)`
+  (each derivative is taken for a change of its number in proportion to its value, so both
+  are in the state's units). Derivatives agree with central differences as before; a
+  derivative much smaller than its state is resolved to `rtol` of the state.
+
 ## [0.8.0] — 2026-11-09
 
 ### Added
