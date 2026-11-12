@@ -39,6 +39,12 @@ versioning; `0.x` releases may change the API.
   (each derivative is taken for a change of its number in proportion to its value, so both
   are in the state's units). Derivatives agree with central differences as before; a
   derivative much smaller than its state is resolved to `rtol` of the state.
+- **The same after a large dose moved late in a run:** a derivative with respect to the time
+  of a dose given late (its direction moves the dose in proportion to its time, so the
+  derivative is large) is huge next to where the dose enters and tiny a few cells away, below
+  the rounding of the linear solve; with a small `atol` the steps were again rejected down to
+  round-off. Entries below 1e-12 of the derivative's largest entry are now held only to that
+  floor.
 
 ## [0.8.0] — 2026-11-09
 

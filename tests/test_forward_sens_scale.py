@@ -49,3 +49,25 @@ def test_a_derivative_that_starts_after_a_dose_with_a_small_atol(name):
     else:
         fd = (_o_end(m, TIMES, (10.0, 10.0 + h)) - _o_end(m, TIMES, (10.0, 10.0 - h))) / (2 * h)
     assert np.isclose(s, fd, rtol=1e-4)
+
+
+LATE = SURFACE.replace("n=6", "n=20 geometry=spherical").replace("k=0.7", "k=0.02")
+
+
+def test_a_large_dose_moved_late_in_the_run_with_a_small_atol():
+    # dose 2 at t = 900: the direction moves it in proportion to its value, so its derivative
+    # is huge next to the surface and tiny a few cells in, below the rounding of the solve
+    m = tq.Model.from_text(LATE)
+    sim = m.simulator(outputs=["o"], rtol=1e-6, atol=1e-20)
+    sc = tq.Scenario(regimen=tq.bolus("P", 29.4, times=[0.0, 900.0]), times=[0.0, 905.0])
+    f = sim.function(sc, wrt=["dose 1 time", "dose 2 time"], derivatives="forward")
+    assert f.status(f.x0) == "ok"
+    s = sim.sensitivity(sc, wrt=["dose 2 time"])["o"]["dose 2 time"][-1]
+
+    def o_end(t2):
+        reg = tq.bolus("P", 29.4, times=[0.0]) + tq.bolus("P", 29.4, times=[t2])
+        sol = m.solve((0, 905), times=[0.0, 905.0], regimen=reg, rtol=1e-11, atol=1e-14)
+        return float(np.asarray(sol["o"])[-1])
+
+    h = 1e-3
+    assert np.isclose(s, (o_end(900 + h) - o_end(900 - h)) / (2 * h), rtol=1e-4)

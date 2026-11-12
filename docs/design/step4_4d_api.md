@@ -152,7 +152,9 @@ s.table()            # a pandas DataFrame: one row per time, one column per (out
      its scale is `atol + rtol (|s| + |y|)` (2026-11-12: with `atol + rtol |s|` alone, a
      derivative that starts from 0 after a dose while the state does not, inside a field
      the dose reaches through its neighbours, failed every step once `atol` was small;
-     `tests/test_forward_sens_scale.py`);
+     `tests/test_forward_sens_scale.py`); plus a floor at `SENS_FLOOR` = 1e-12 of the
+     direction's largest entry (2026-11-12: after a large dose moved late in a run, entries a
+     few cells from the surface were below the rounding of the solve);
    - across a dose or infusion boundary it gets the dose's change and the jump of the
      right-hand side times how fast the boundary moves; across an event it is kept as it
      is (zero for a group zeroed there). It only chooses steps; the derivatives themselves
