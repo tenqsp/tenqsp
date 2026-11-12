@@ -297,7 +297,13 @@ print(np.max(np.abs(a["conc"] - b["conc"])) / np.max(a["conc"]))
   (the "sparse tier"); a solve there takes 1.5 to 2.6 times as long as on scipy
   ([Performance](../background/performance.md)).
 - **No Radau fallback.** A failing run raises `tq.SolverError` saying where it failed and
-  suggesting `backend="scipy"`.
+  suggesting `backend="scipy"`. The case where this matters is the one in
+  [Tolerances](#tolerances): a large dose into a state near 0 with a very small `atol` (below
+  about 1e-15 of the rise). scipy then often succeeds only through its Radau retry, so the
+  same run can fail on JAX. Derivatives always run on JAX, so for them the remedy is the
+  tolerance: raise `atol` for the dosed states to about 1e-13 of the largest dose's rise, or
+  keep the tiny `atol` and check that `m.diagnostics(sol)` on the scipy run reports no Radau
+  retries before asking for derivatives.
 - **Slots.** JAX needs fixed array sizes, so the number of doses, infusions and output times is
   rounded up to a power of two (at least 8). A run with 9 doses after runs with 8 builds once
   more, then not again.
