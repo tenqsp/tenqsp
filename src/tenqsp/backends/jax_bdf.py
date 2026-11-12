@@ -33,7 +33,8 @@ its own difference array, rescaled and updated with the state's; after each conv
 solve its corrector (linear) is solved with the same factorised matrix, iterated as Newton
 is (no convergence: as a Newton failure); its error enters the error test and the order
 choice (the larger of the two norms, as CVODES with ``errconS``), on the scale
-``atol + rtol (|s| + |y|)`` (``_sens_scale``). So a solution at rest whose derivative is not
+``atol + rtol (|s| + |y|)`` and a floor at ``SENS_FLOOR`` of its largest entry
+(``_sens_scale``). So a solution at rest whose derivative is not
 cannot take steps too coarse for the derivative.
 """
 
@@ -169,16 +170,25 @@ DENSE = LinearSolver(
 )
 
 
+# Below this fraction of a derivative's largest entry, its entries are rounding: a linear
+# solve with that entry in it resolves the others only to about this (some 5000 x eps)
+SENS_FLOOR = 1e-12
+
+
 def _sens_scale(atol_s, rtol, s, y, p):
     """The error scale of the carried derivative ``s`` (``p`` directions side by side) at the
-    state ``y``: ``atol + rtol (|s| + |y|)``. Each direction moves its number in proportion to
-    its value, so ``s`` is in the state's units (the change for a 100 % change); it is asked
-    to be as accurate as the state itself (``rtol |y|``) and to ``rtol`` of its own size. The
-    ``rtol |y|`` term matters where a derivative starts from 0 while the state does not (just
-    after a dose, inside a field the dose reaches through its neighbours): its first steps
-    have an error estimate as large as itself, which ``atol + rtol |s|`` alone can only accept
-    if ``atol`` happens to be large."""
-    return atol_s + rtol * (jnp.abs(s) + jnp.tile(jnp.abs(y), p))
+    state ``y``: ``atol + rtol (|s| + |y|) + SENS_FLOOR max|s|`` (the largest entry of the
+    same direction). Each direction moves its number in proportion to its value, so ``s`` is
+    in the state's units (the change for a 100 % change); it is asked to be as accurate as
+    the state itself (``rtol |y|``) and to ``rtol`` of its own size. ``rtol |y|`` matters
+    where a derivative starts from 0 while the state does not (just after a dose, inside a
+    field the dose reaches through its neighbours): its first steps have an error estimate as
+    large as itself. The floor matters just after a large dose moved in time: the derivative
+    is then huge next to where the dose enters and tiny a few cells away, where rounding in
+    the solve is larger than ``rtol`` of its value, and shorter steps only make it worse.
+    Without either, a small ``atol`` failed every step."""
+    big = jnp.repeat(jnp.max(jnp.abs(s.reshape(p, -1)), axis=1), s.shape[0] // p)
+    return atol_s + rtol * (jnp.abs(s) + jnp.tile(jnp.abs(y), p)) + SENS_FLOOR * big
 
 
 def _rms(x):
