@@ -145,8 +145,14 @@ def test_function_jacfwd_and_vmap_on_the_sparse_tier(sparse):
     assert len(jax_sparse.REGISTRY) == 0
 
 
-def test_less_record_room_on_large_models():
-    # design decision 2026-10-25 (design note §5.2): memory grows with states x room
-    from tenqsp.gradients import record_room
+def test_record_sizes_round_up_by_at_most_a_quarter():
+    # design decision 2026-11-12: 2x room for every size, rounded finely
+    from tenqsp.gradients import RECORD_ROOM, record_slots
 
-    assert record_room(141) == 4 and record_room(2_000) == 4 and record_room(2_001) == 2
+    assert RECORD_ROOM == 2
+    assert [record_slots(k) for k in (1, 9, 128, 129, 161, 257, 15_471, 30_942)] == [
+        8, 16, 128, 160, 192, 320, 16_384, 32_768
+    ]  # fmt: skip
+    for k in range(1, 5000, 7):  # never below k, at most a quarter above (past 128)
+        r = record_slots(k)
+        assert r >= k and (k <= 128 or (r <= 1.25 * k and r % 32 == 0))

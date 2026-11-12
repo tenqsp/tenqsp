@@ -289,12 +289,24 @@ from the work at reasonable values, say 50 times `f.steps(f.x0)`, so that a run 
 extreme value fails quickly instead of taking minutes. A function of several scenarios
 gives one count per scenario: `fs.steps(X)`.
 
-**The record has room** (reverse only) for 4 times the steps of the run at `f.x0` (2 times on
-models above 2,000 states, to halve the memory a gradient needs there). An `x`, or a much tighter
-`rtol` given to one call, that needs more gives NaN, with the status "too many steps for the
-record (make a new sim.function(...) at this x, or at this tolerance; ...)": build a new
-function at values closer to the ones you need, or from a simulator at that tolerance.
-Forward derivatives keep no record, so they have no such limit.
+**The record has room** (reverse only). Reverse derivatives write down every step of the run
+and then walk back through that record. JAX compiles the function once, with arrays of a
+fixed size, so the record's size is chosen when `f` is made: by default twice the steps of
+the run at `f.x0`, rounded up by at most a quarter. `f.capacity` is that size, in steps. An
+optimizer that moves `x` to values where the run takes more steps (faster processes, a
+tighter `rtol` given to one call) can need more; that run gives NaN, and `f.status(x)` says
+so and names the room to ask for:
+
+```python
+fr = sim.function(sc, wrt=["CL", "V"], derivatives="reverse", record_room=4)  # 4x the steps at x0
+print(fr.capacity)                     # 384 steps (the default room: 192; the run at x0 takes 90)
+```
+
+More room costs memory in proportion to the record's size and the number of states. For
+scale: a 1,062-state model whose run takes 18,000 steps (a record of 40,960 with the default
+room) needs 20 GB for the derivatives of four outputs. Building the function again with `x0`
+near the new values is the alternative.
+Forward derivatives keep no record, so they have neither the limit nor the memory.
 
 **Pre-runs are fixed.** A scenario that starts from a pre-run
 ([Simulation and exploration](simulation.md)) starts from a fixed state: the derivatives do
