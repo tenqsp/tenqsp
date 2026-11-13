@@ -6,6 +6,13 @@ versioning; `0.x` releases may change the API.
 ## [Unreleased]
 
 ### Added
+- **Known issues and updates:** `tq.known_issues()` lists the known problems of the installed
+  version, from a list shipped with it (`known_issues.json`: the versions affected, the fix,
+  whether results could change without an error, the areas touched); no network.
+  `tq.check_updates()` asks PyPI for the newest version, only when called, and prints the
+  fixes since the installed version, those that can change results first, then the problems
+  still open and the new features. `show=False` returns either as data. Nothing checks for
+  updates on its own.
 - **A bioavailability that differs by level:** into a field over a categorical axis, the
   fraction of each dose that arrives may be one value per level, `bioavailability C =
   F[phage]` (two phages dosed into their own slices of `C`, each scaled by its own F). It

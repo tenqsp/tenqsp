@@ -62,3 +62,37 @@ pip install -U "jax[cuda12]"
 
 Without a GPU, JAX prints a one-line note that it falls back to the CPU; that note needs no
 action.
+
+## Known issues and updates
+
+Problems found in released versions are listed with TenQSP, together with the version that
+fixed each one and whether it could change results without an error:
+
+```py
+import tenqsp as tq
+
+tq.known_issues()      # the known problems of the installed version (no network needed)
+tq.check_updates()     # asks PyPI for the newest version, only when you call it
+```
+
+`tq.known_issues()` reads the list installed with TenQSP, so it knows only the problems
+found up to its release. `tq.check_updates()` reads the newest release's list and changelog
+and prints, for the installed version:
+
+```text
+TenQSP 0.8.0 installed, 0.9.0 available.
+Fixes that may change your results:
+  - (each fix, the areas it touches, and the version that fixed it)
+Other fixes:
+  - (fixes of runs that stopped with an error)
+Known issues not yet fixed:
+  - (each one with what to do about it)
+New features:
+  - (the new features, with their version)
+Upgrade: pip install -U tenqsp
+```
+
+Read the first group before upgrading in the middle of a project: those fixes can change
+numbers you have already reported. Both functions take `show=False` to return the same
+information as data instead of printing it. TenQSP never checks for updates on its own, and
+`check_updates` installs nothing; without a network it says so.

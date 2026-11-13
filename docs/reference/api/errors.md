@@ -23,3 +23,9 @@
 ::: tenqsp.MissingValues
 
 ::: tenqsp.SolverError
+
+## Known issues and updates
+
+::: tenqsp.known_issues
+
+::: tenqsp.check_updates

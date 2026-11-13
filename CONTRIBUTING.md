@@ -35,6 +35,11 @@ mkdocs build --strict        # if you changed the documentation
   test that only repeats what the code computes does not count.
 - **Error messages are for modellers.** Say what is wrong in the model's own terms, on which
   line, and what to write instead.
+- **A fix of a problem in a released version** adds an entry to
+  `src/tenqsp/known_issues.json` (the versions affected, the version it is fixed in, whether
+  it could change results without an error, and the areas it touches), so that
+  `tq.check_updates()` can tell users of older versions about it. A problem found but not yet
+  fixed gets an entry with `"fixed_in": null`.
 - **Nothing hidden.** No value may be clipped, capped or switched behind the user's back;
   any numerical safeguard must appear in `explain()`.
 - New source files start with the licence header:
