@@ -47,6 +47,13 @@ versioning; `0.x` releases may change the API.
   to a function without a record (forward derivatives, `derivatives=False`) raises.
 
 ### Changed
+- **Large models run faster on the JAX backend:** a 1,062-state tumour model took 27 s
+  instead of 62 s (the scipy backend: 18 s), with the same steps and results. The sparse
+  Jacobian is assembled once per Jacobian rather than at every factorisation (67 times
+  instead of 2,900 in that run), and, on Linux, a single run keeps its factorisations and
+  solves on one core while it lasts, instead of moving between idle cores that run at a low
+  clock. `tenqsp._threads.PIN_HOST_THREAD = False` turns the second off; batches are not
+  pinned.
 - **Reverse derivatives need much less memory:** the record holds 2 times the steps of the
   run at `f.x0` on every model (was 4 times, 2 above 2,000 states), rounded up by at most a
   quarter instead of to the next power of two; and the replay keeps only the start of each

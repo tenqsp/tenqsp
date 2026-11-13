@@ -142,7 +142,13 @@ def solve(
     infusions, atol_states, y_initial = run.infusions, run.atol_states, run.y_initial
     program = _program(cm, ledger=ledger, model_doses=regimen is None)
     start = time.perf_counter()
-    out = jax.block_until_ready(program(**run.args))
+    try:
+        out = jax.block_until_ready(program(**run.args))
+    finally:
+        if tier(cm) == "sparse":  # the run's threads get their cores back, also on an error
+            from tenqsp.backends import jax_sparse
+
+            jax_sparse.unpin()
     wall = time.perf_counter() - start
     doses = _check(cm, out, run)
     Z = np.asarray(out["ys"])[: t_out.size]

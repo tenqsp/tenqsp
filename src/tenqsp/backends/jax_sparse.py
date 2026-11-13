@@ -22,21 +22,28 @@ backends take the same steps (V9).
 Host calls (``jax.pure_callback``) run on the CPU. Under ``jax.vmap`` (step 4.6) one call
 takes the whole batch and works through its members one after another.
 
-Every factorisation kept between host calls is made and freed on one Python thread
-(``_on_owner``). With scipy 1.18 a ``SuperLU`` made in one host call and freed in
+The run's host work (factorisations, solves, and freeing them) is done on one Python
+thread (``_on_owner``). With scipy 1.18 a ``SuperLU`` made in one host call and freed in
 another never returns its memory (~2 MB at 500 states): JAX runs host calls on its own
 threads, whose Python state lasts one call, even when the same thread makes and frees it
-(found at step 4.7: 57 GB for 1,000 members at 505 states). Solves, which neither make
-nor free one, run where JAX calls them. The cost, on a machine whose idle cores run at a
-low clock (the ``ondemand`` governor): one run 1.1-1.6x slower (none on one core, none
-for batches).
+(found at step 4.7: 57 GB for 1,000 members at 505 states). That thread stays on the core
+it starts on (``tenqsp._threads.PIN_HOST_THREAD``): on a machine whose idle cores run at a
+low clock (the ``ondemand`` governor), a thread woken for every solve otherwise lands on
+cold cores, and the host work took twice as long (measured on a 1,062-state model: 62 s
+for the run, against 29 s pinned and 17 s for the scipy backend).
+
+The assembled Jacobian is kept while its pieces are unchanged (``_Assembled``): the
+solver factorises ``I - c J`` for a new ``c`` far more often than it computes a new ``J``
+(2,900 times against 67 in that run), as scipy's BDF does.
 """
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import os
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import jax
@@ -45,33 +52,107 @@ import numpy as np
 import scipy.sparse as sps
 from scipy.sparse.linalg import splu
 
+from tenqsp import _threads
 from tenqsp._threads import limited
 from tenqsp.backends.jax_bdf import LinearSolver, when
 
 
 class _Owner:
-    """The one thread that makes and frees the kept factorisations (see the module
-    docstring). Made on first use, and again in a child process after ``os.fork`` (the
-    parent's thread does not exist there)."""
+    """The one thread that does the host work: makes, uses and frees the factorisations
+    (see the module docstring). Made on first use, and again in a child process after
+    ``os.fork`` (the parent's thread does not exist there)."""
 
     def __init__(self):
-        self._pool: ThreadPoolExecutor | None = None
-        self._ident: int | None = None
-        self._lock = threading.Lock()
+        self.reset()
 
     def reset(self):
         self._pool, self._ident, self._lock = None, None, threading.Lock()
+        self._native: int | None = None  # its operating-system thread id
+        self._core: int | None = None  # the core the thread is pinned to
+        self._allowed: set[int] | None = None  # its cores before that
+        self._callers: dict[int, set[int]] = {}  # JAX threads pinned there: cores to give back
+        self._callers_lock = threading.Lock()
+
+    def pin_caller(self):
+        """On a JAX thread making a host call: keep it on the owner's core while one
+        unbatched integration is running, so the run's host work and its hand-overs stay on
+        one warm core. With more (a batch, or runs in several Python threads) the threads
+        are given back their cores: they would compete for one core. ``unpin_callers``
+        gives them back when the integration ends."""
+        core = self._core
+        if core is None or not _threads.PIN_HOST_THREAD:
+            if self._callers:
+                self.unpin_callers()
+            return
+        if len(REGISTRY) > 1:
+            if self._callers:
+                self.unpin_callers()
+            return
+        tid = threading.get_native_id()
+        if tid in self._callers:
+            return
+        allowed = self._allowed
+        try:
+            if os.sched_getaffinity(0) != allowed:  # placed by someone else: left alone
+                return
+            with self._callers_lock:
+                self._callers[tid] = allowed
+            os.sched_setaffinity(0, {core})
+        except OSError:
+            return
+
+    def unpin_callers(self):
+        """Give the JAX threads pinned by ``pin_caller`` their cores back, and those they
+        started while pinned (a new thread inherits its creator's cores): every thread of
+        this process on the owner's core alone, but the owner."""
+        with self._callers_lock:
+            callers, self._callers = self._callers, {}
+        if not callers:
+            return
+        core, allowed, owner = self._core, self._allowed, self._native
+        try:
+            tids = [int(t) for t in os.listdir("/proc/self/task")]  # this process's threads
+        except OSError:
+            tids = list(callers)
+        for tid in tids:
+            if tid == owner:
+                continue
+            try:
+                if tid in callers or os.sched_getaffinity(tid) == {core}:
+                    os.sched_setaffinity(tid, allowed)
+            except OSError:  # ended meanwhile
+                pass
+
+    def _place(self):
+        """On the owner thread: pin it to its current core, or release it, as
+        ``_threads.PIN_HOST_THREAD`` says."""
+        want = _threads.PIN_HOST_THREAD and hasattr(os, "sched_setaffinity")
+        if want and self._core is None:
+            cpu = _threads.current_cpu()
+            allowed = os.sched_getaffinity(0)
+            if cpu is not None and cpu in allowed:
+                os.sched_setaffinity(0, {cpu})
+                self._core, self._allowed = cpu, allowed
+                self._native = threading.get_native_id()
+        elif not want and self._core is not None:
+            os.sched_setaffinity(0, self._allowed)
+            self._core = None
+
+    def _call(self, fn, *args):
+        self._place()
+        return fn(*args)
 
     def run(self, fn, *args):
         if threading.get_ident() == self._ident:
             return fn(*args)
+        self.pin_caller()
         with self._lock:
             if self._pool is None:
                 self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tenqsp-superlu")
                 self._ident = self._pool.submit(threading.get_ident).result()
             pool = self._pool
         try:
-            future = pool.submit(fn, *args)
+            future = pool.submit(self._call, fn, *args)
         except RuntimeError:  # interpreter shutting down: no new work for threads
             return fn(*args)
         return future.result()
@@ -83,6 +164,17 @@ _OWNER = _Owner()
 def _on_owner(fn, *args):
     """``fn(*args)`` on the owner thread."""
     return _OWNER.run(fn, *args)
+
+
+def _pinned(fn, *args):
+    """``fn(*args)`` here, on a JAX thread kept on the owner's core (``_Owner.pin_caller``)."""
+    _OWNER.pin_caller()
+    return fn(*args)
+
+
+def unpin():
+    """Give the JAX threads kept on the owner's core their cores back (at the end of a run)."""
+    _OWNER.unpin_callers()
 
 
 class _Registry:
@@ -134,9 +226,43 @@ if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
-def _matrix(cm, ledger, pieces, c):
-    J = cm.assemble_sparse(pieces, ledger=ledger)
-    return (sps.eye_array(J.shape[0], format="csc") - float(c) * J).tocsc()
+class _Assembled:
+    """Assembled Jacobians by key (a member of a batch), each kept while the pieces it was
+    assembled from are unchanged (compared by a hash of their bytes), up to ``NNZ_BUDGET``
+    stored entries in all; past it, a Jacobian is assembled each time, as before."""
+
+    NNZ_BUDGET = 20_000_000  # ~240 MB
+
+    def __init__(self, cm, ledger: bool):
+        self.cm, self.ledger = cm, ledger
+        self._J: dict = {}
+        self._nnz = 0
+        self._lock = threading.Lock()
+
+    def matrix(self, key, pieces, c):
+        """``I - c J``, CSC."""
+        pieces = [np.ascontiguousarray(p) for p in pieces]
+        h = hashlib.blake2b(digest_size=16)
+        for p in pieces:
+            h.update(repr((p.dtype.str, p.shape)).encode())
+            h.update(p.data)
+        digest = h.digest()
+        with self._lock:
+            kept = self._J.get(key)
+        if kept is not None and kept[0] == digest:
+            J = kept[1]
+        else:
+            J = self.cm.assemble_sparse(pieces, ledger=self.ledger)
+            with self._lock:
+                old = self._J.pop(key, None)
+                self._nnz -= 0 if old is None else old[1].nnz
+                if self._nnz + J.nnz <= self.NNZ_BUDGET:
+                    self._J[key] = (digest, J)
+                    self._nnz += J.nnz
+        return (sps.eye_array(J.shape[0], format="csc") - float(c) * J).tocsc()
+
+
+_REPLAY: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # model -> _Assembled
 
 
 class _Failed:
@@ -165,10 +291,12 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
     iteration rather than one per member, and only the members that need a new
     factorisation get one (``refactor``). (Threads do not help: measured, step 4.6.)"""
     n_all = cm.n_states + (len(cm.ledger_entries) if ledger else 0)
+    assembled = _Assembled(cm, ledger)
 
     @limited
     def factor_host(c, *pieces):
-        return np.int64(REGISTRY.add(_splu(_matrix(cm, ledger, pieces, c))))
+        # key 0: an unbatched run's ``refactor`` reuses this Jacobian
+        return np.int64(REGISTRY.add(_splu(assembled.matrix(0, pieces, c))))
 
     @limited
     def refactor_host(need, F, c, *pieces):
@@ -179,7 +307,7 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
         flat = [np.asarray(p).reshape(size, *np.shape(p)[len(lead) :]) for p in pieces]
         need, F, c = need.reshape(size), F.reshape(size).copy(), c.reshape(size)
         for i in np.flatnonzero(need):
-            lu = _splu(_matrix(cm, ledger, [p[i] for p in flat], c[i]))
+            lu = _splu(assembled.matrix(int(i), [p[i] for p in flat], c[i]))
             REGISTRY.drop(int(F[i]))  # replaced: nothing holds it any more
             F[i] = REGISTRY.add(lu)
         return F.reshape(lead)
@@ -221,7 +349,7 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
 
     def solve(F, b):
         return jax.pure_callback(
-            solve_host,
+            lambda *args: _pinned(solve_host, *args),
             jax.ShapeDtypeStruct((n_all,), jnp.float64),
             F,
             b,
@@ -232,6 +360,7 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
         F = np.asarray(F)
         for h in F.reshape(-1):
             REGISTRY.drop(int(h))  # the integration has ended: nothing will use it
+        _OWNER.unpin_callers()
         return np.zeros(F.shape, dtype=np.int64)
 
     def release(F):
@@ -257,6 +386,9 @@ def solve_step(cm, pieces, c, b, matvec):
     the transposed factors. ``matvec(x) = (I - c J) x`` in JAX (for JAX's bookkeeping).
     ``b`` may carry leading batch dimensions (several right-hand sides, one factorisation)."""
     n = cm.n_states
+    assembled = _REPLAY.get(cm)
+    if assembled is None:
+        assembled = _REPLAY.setdefault(cm, _Assembled(cm, False))
 
     @limited
     def host(trans, c, b, *pieces):
@@ -270,7 +402,7 @@ def solve_step(cm, pieces, c, b, matvec):
         b = np.broadcast_to(b, (*lead, n))
         if all(int(np.prod(sh)) == 1 for sh in leads):  # one matrix for every right-hand side
             one = [p.reshape(p.shape[p.ndim - k :]) for p, k in zip(pieces, base_ndim, strict=True)]
-            lu = _splu(_matrix(cm, False, one, c.reshape(())))
+            lu = _splu(assembled.matrix(None, one, c.reshape(())))
             return lu.solve(b.reshape(-1, n).T, trans=trans).T.reshape(b.shape)
         out = np.empty(b.shape)
         for idx in np.ndindex(*lead):  # a batch of matrices (vmap over parameters)
@@ -280,7 +412,7 @@ def solve_step(cm, pieces, c, b, matvec):
                 return a[idx]
 
             p_i = [at(p, k) for p, k in zip(pieces, base_ndim, strict=True)]
-            out[idx] = _splu(_matrix(cm, False, p_i, at(c, 0))).solve(b[idx], trans=trans)
+            out[idx] = _splu(assembled.matrix(idx, p_i, at(c, 0))).solve(b[idx], trans=trans)
         return out
 
     base_ndim = [np.ndim(p) for p in pieces]
