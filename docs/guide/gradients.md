@@ -147,6 +147,53 @@ y_tight = f(f.x0, rtol=1e-10, atol=1e-12)["conc"]
 print(np.max(np.abs(f(f.x0)["conc"] - y_tight)))  # what the simulator's tolerances cost
 ```
 
+### Areas and means over time: integrate them in the model
+
+To differentiate an area under a curve, or a mean over time, let the model integrate it: add
+a compartment whose rate is the quantity. Do not sum the outputs over output times. A sum is
+an estimate of the area, and its derivative is the derivative of that estimate, which can be
+far from the area's own. This matters most for dose times: a dose that moves between output
+times changes the sum by much more than it changes the area.
+
+```python
+m_auc = tq.Model.from_text("""
+model iv_bolus_auc
+param CL=4, V=30
+d_t(A) = -CL/V*A                # amount in the body
+d_t(AUC) = A/V                  # the area under the concentration curve
+observable conc = A/V
+""")
+sim_auc = m_auc.simulator(outputs=["conc", "AUC"], rtol=1e-8, atol=1e-10)
+sc2 = tq.Scenario(regimen=tq.bolus("A", 100, times=[0, 12]), times=[24])
+f2 = sim_auc.function(sc2, wrt=["dose 2 time"])
+dauc = jax.grad(lambda x: f2(x)["AUC"][-1])(f2.x0)[0]
+print(dauc)                  # -0.673
+```
+
+**Checking it by hand.** Moving the second dose later by a small time shortens its
+contribution to the area up to 24 h by the concentration it would leave at 24 h, so the
+derivative is \( -\frac{D}{V} e^{-CL\,(24-12)/V} \):
+
+```python
+assert np.isclose(dauc, -100 / 30 * np.exp(-4 / 30 * 12), rtol=1e-5)
+```
+
+The same area as a trapezoid sum over hourly output times gives a derivative of the wrong
+sign:
+
+```python
+f3 = sim_auc.function(sc2.replace(times=np.arange(0, 25.0)), wrt=["dose 2 time"])
+
+def trapezoid(x):
+    c = f3(x)["conc"]
+    return jnp.sum((c[1:] + c[:-1]) / 2)
+
+print(jax.grad(trapezoid)(f3.x0)[0])   # +2.9: the derivative of the sum, not of the area
+```
+
+A mean over the course is the area divided by its length. The same goes for other running
+quantities, such as the area under the log of a count (`d_t(L) = log(N)`).
+
 ### A small fit
 
 Synthetic data from `CL = 5`, `V = 25`, fitted from the scenario's values with
