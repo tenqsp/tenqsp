@@ -6,6 +6,12 @@ versioning; `0.x` releases may change the API.
 ## [Unreleased]
 
 ### Added
+- **A warning when values go negative:** a run (`m.solve`, `sim(...)`, either backend) whose
+  state went below −10 × `atol` warns with `tq.NegativeValuesWarning`, naming the state, how
+  far and when, and whether the negative part grew; it used to be reported only by
+  `m.diagnostics(sol)`. It counts a dip that is small next to the state's values, or any dip
+  of a state its equations keep from going below zero (an undershoot that growth or
+  selection then amplifies). A run that fails after such a dip says so in its error message.
 - **Known issues and updates:** `tq.known_issues()` lists the known problems of the installed
   version, from a list shipped with it (`known_issues.json`: the versions affected, the fix,
   whether results could change without an error, the areas touched); no network.
@@ -52,6 +58,8 @@ versioning; `0.x` releases may change the API.
   restores it.
 
 ### Fixed
+- A per-state `atol` given as a list for a model with one state (`atol=[1e-8]`) failed with
+  a `TypeError` at the end of the run.
 - **Derivatives with respect to a later dose, with a small `atol`:** `sim.function`,
   `sim.sensitivity` and the steering of reverse derivatives failed ("required step size is
   less than spacing between numbers") just after a dose that is not at the start, when

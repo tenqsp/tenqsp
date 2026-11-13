@@ -17,7 +17,7 @@ import tenqsp as tq
 | [Derivatives](derivatives.md) | `sim.function`, `sim.sensitivity` and what they return |
 | [Solutions and the ledger](solution.md) | what `m.solve` returns; the conservation ledger |
 | [Plots](plot.md) | `tq.plot.trajectories`, `fan`, `sensitivity`, `snapshot` |
-| [Checks and errors](errors.md) | `tq.validate`, reports, the IR, every exception; `tq.known_issues`, `tq.check_updates` |
+| [Checks and errors](errors.md) | `tq.validate`, reports, the IR, every exception and warning; `tq.known_issues`, `tq.check_updates` |
 
 The tasks these serve are explained in the [User guide](../../guide/index.md); the model
 language in the [Notation reference](../notation.md).

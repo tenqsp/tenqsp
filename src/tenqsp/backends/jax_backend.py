@@ -46,7 +46,13 @@ from tenqsp.backends.jax_bdf import (
     empty_record,
     while_running,
 )
-from tenqsp.backends.scipy_backend import SolverError, _solution, dose_hint
+from tenqsp.backends.scipy_backend import (
+    SolverError,
+    _solution,
+    dose_hint,
+    negative_tails,
+    warn_negative,
+)
 from tenqsp.compile import CompiledModel
 from tenqsp.ledger import build_ledger
 
@@ -175,7 +181,7 @@ def solve(
     sol = _solution(cm, t_out, Y, th, "BDF (JAX)", stats, [], book, extinctions)
     sol.doses = doses
     sol.infusions = [(float(a), float(b), tg, float(r * f)) for a, b, tg, r, f in infused]
-    user_atol = float(atol_states) if atol_states.size == 1 else atol_states.copy()
+    user_atol = float(atol_states) if atol_states.ndim == 0 else atol_states.copy()
     sol.options = {
         "method": "BDF",
         "backend": "jax",
@@ -183,6 +189,7 @@ def solve(
         "atol": user_atol,
         "max_step": max_step,
     }
+    warn_negative(cm, sol, atol_states)
     return sol
 
 
@@ -361,10 +368,17 @@ def _check(cm, out, run) -> list:
             )
         if not hint:
             hint = dose_hint(doses, float(out["t"]), float(atol_states.min()))
+        ys = np.asarray(out["ys"])[: run.t_out.size, : run.n]
+        reached = run.t_out <= float(out["t"])  # later rows hold no solution
+        tails = negative_tails(cm, run.t_out[reached], ys[reached], atol_states, run.th)
+        tails = f" Before the failure, {tails}" if tails else ""
+        if not hint:
+            hint = tails
         if status == NOT_FINITE:  # not the solver's fault: no other solver does better
             raise SolverError(
                 f"The JAX solver stopped at t = {float(out['t']):g}: {STATUS_TEXT[status]}. "
                 "Check the parameter values and the formulas that divide or take logarithms."
+                f"{tails}"
             )
         raise SolverError(
             f"The JAX solver failed at t = {float(out['t']):g} ({STATUS_TEXT[status]}).{hint} "

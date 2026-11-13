@@ -379,8 +379,22 @@ tolerance allowed an undershoot. Tighten atol/rtol, or check for a negative rate
 diffusivity.
 ```
 
+The run itself also warns, without asking for diagnostics:
+
+```text
+NegativeValuesWarning: 'B' went negative (down to -2.18e+06 at t = 40, and the negative part
+grew; -10 x atol = -1e-05). Either the solver let it undershoot (atol = 1e-06 does not control
+values this small, and growth or selection can amplify them: use a smaller atol for 'B'), or a
+rate or diffusivity drives it below zero (check the formulas).
+```
+
 **What it means.** TenQSP never clips a value: a negative value the solver makes is kept, and
-reported once it is below −10 × `atol`. Here the population undershot to a tiny negative
+reported once it is below −10 × `atol`. The run warns (`tq.NegativeValuesWarning`) when the
+dip is small next to the state's values, or when the equations cannot take the state below
+zero (its rate at 0 is not negative, as for `g*B - k_kill*B`); a state the equations drive
+below zero on purpose, or one that starts below zero, is left to `diagnostics`. If a run
+fails after such a dip, the error message says so. To silence the warning:
+`warnings.filterwarnings("ignore", category=tq.NegativeValuesWarning)`. Here the population undershot to a tiny negative
 number while it was below `atol`; once the killing stopped, it "grew" at rate 1, away from 0,
 to −2e6. A negative population that grows is a symptom of this kind: the equations are
 fine, the solve did not resolve the small numbers.

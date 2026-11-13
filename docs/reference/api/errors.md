@@ -24,6 +24,10 @@
 
 ::: tenqsp.SolverError
 
+## Warnings
+
+::: tenqsp.NegativeValuesWarning
+
 ## Known issues and updates
 
 ::: tenqsp.known_issues
