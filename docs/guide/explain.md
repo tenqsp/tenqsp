@@ -223,7 +223,8 @@ hidden clamps: no value is ever clipped, capped or floored to keep a run going.
 ```text
 Numerical safeguards (the complete list)
   No value is clipped, capped or floored: negative values, if the solver makes any, are
-  kept and reported by diagnostics(sol).
+  kept and reported by diagnostics(sol); an undershoot below -10 x atol also raises a
+  NegativeValuesWarning when the run ends.
   Solver: BDF unless solve(method=...) says otherwise; a segment where BDF fails is retried
   once with Radau (said in sol.messages).
   Each segment (between doses) starts with a fresh step, never below 1e-08 x its length.

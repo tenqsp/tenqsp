@@ -323,7 +323,10 @@ B(0) = 1
     rep = m.diagnostics(sol)
     assert any("fell below atol" in i.message and i.where == "B" for i in rep.warnings)
     guarded = tq.Model.from_text(text + "extinction B below 1e-3\n")
-    sol = guarded.solve((0, 10), times=np.linspace(0, 10, 101), atol=1e-6)
+    # after the extinction, regrowth starts at 1e-8, below atol: the solver's noise sets its
+    # sign, and here it grows negative, which the run reports
+    with pytest.warns(tq.NegativeValuesWarning, match="'B' went negative"):
+        sol = guarded.solve((0, 10), times=np.linspace(0, 10, 101), atol=1e-6)
     assert not any("fell below atol" in i.message for i in guarded.diagnostics(sol).warnings)
 
 

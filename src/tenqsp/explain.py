@@ -1120,7 +1120,8 @@ def _safeguards(ir: ModelIR, report: Report) -> list[str]:
 
     out = [
         "  No value is clipped, capped or floored: negative values, if the solver makes any, are",
-        "  kept and reported by diagnostics(sol).",
+        "  kept and reported by diagnostics(sol); an undershoot below -10 x atol also raises a",
+        "  NegativeValuesWarning when the run ends.",
         "  Solver: BDF unless solve(method=...) says otherwise; a segment where BDF fails is "
         "retried once with Radau (said in sol.messages).",
         f"  Each segment (between doses) starts with a fresh step, never below "

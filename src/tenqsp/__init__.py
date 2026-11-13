@@ -13,7 +13,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from . import plot  # noqa: E402  (matplotlib only when a plot is drawn)
-from .backends.scipy_backend import SolverError  # noqa: E402
+from .backends.scipy_backend import NegativeValuesWarning, SolverError  # noqa: E402
 from .explore import BatchResult, Grid, PreRun, grid  # noqa: E402
 from .expr import FormulaError  # noqa: E402
 from .formula import formula  # noqa: E402
@@ -140,6 +140,7 @@ __all__ = [
     "sinh",
     "Slice",
     "table",
+    "NegativeValuesWarning",
     "SolverError",
     "sqrt",
     "tan",

@@ -23,6 +23,16 @@
       "workaround": "A larger atol."
     },
     {
+      "id": "atol-list-one-state",
+      "title": "A per-state atol given as a list failed for a model with one state",
+      "area": ["solver"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.8.1",
+      "changes_results": false,
+      "details": "m.solve(..., atol=[1e-8]) on a model with a single state stopped with a TypeError ('only 0-dimensional arrays can be converted to Python scalars') at the end of the run, on either backend.",
+      "workaround": "Give atol as a number: atol=1e-8."
+    },
+    {
       "id": "second-derivatives-reverse",
       "title": "Second derivatives with derivatives=\"reverse\" were wrong",
       "area": ["derivatives"],

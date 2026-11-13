@@ -36,6 +36,7 @@ preserves linear invariants whether or not the ledger variables are in the conve
 from __future__ import annotations
 
 import dataclasses
+import os
 import time
 import warnings
 from collections.abc import Mapping, Sequence
@@ -84,6 +85,88 @@ def dose_hint(doses, t: float, atol_min: float) -> str:
         f"below about {atol_floor(rise):.0e} its rounding errors can make BDF fail. Try "
         f"atol={atol_floor(rise):.0e} or larger."
     )
+
+
+class NegativeValuesWarning(UserWarning):
+    """A state went below zero by more than its tolerance allows (beyond -10 x atol), while
+    its values are otherwise far larger: an undershoot the solver did not control, which
+    growth or selection can amplify until the run fails. Silence it as any warning:
+    ``warnings.filterwarnings("ignore", category=tq.NegativeValuesWarning)``."""
+
+
+_PACKAGE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TAIL_FRACTION = 1e-3  # a dip deeper than this share of the state's largest value is not a tail
+
+
+def negative_tails(cm: CompiledModel, T, Y, atol_states, theta=None) -> str:
+    """Sentences about the states whose values went below -10 x atol, with what to do; ""
+    if none did. Only what the solver made counts: a dip of at most ``TAIL_FRACTION`` of the
+    state's largest value, or any dip of a state its equations keep from going below zero
+    (with every state at 0 or above and this one at 0, its rate is not negative; checked at
+    the deepest point, with ``theta``). A state that starts below zero, or that its equations
+    drive below zero in a sizeable dip, may be negative by design and is left alone, as are
+    compartments booking what crosses a Dirichlet or Robin end (either way)."""
+    Y = np.asarray(Y, dtype=np.float64)
+    T = np.asarray(T, dtype=np.float64)
+    rows = np.all(np.isfinite(Y), axis=1)  # a failed JAX run leaves NaN rows
+    T, Y = T[rows], Y[rows]
+    if not T.size:
+        return ""
+    atol = np.broadcast_to(np.asarray(atol_states, dtype=np.float64), (cm.n_states,))
+    booked = {b.to for b in cm.ir.boundaries if b.to and b.kind in ("dirichlet", "robin")}
+    found = []  # (depth / atol, name, low, t_low, grew, atol)
+    for name in cm.layout.names:
+        if name in booked:
+            continue
+        sl = cm.layout.slices[name]
+        v, a = Y[:, sl], atol[sl]
+        below = v < -10 * a
+        if not below.any() or np.any(v[0] < -10 * a):
+            continue
+        low = float(v.min())
+        k, j = np.unravel_index(int(np.argmin(v)), v.shape)
+        if -low > TAIL_FRACTION * float(np.abs(v).max()) and not _kept_nonnegative(
+            cm, T[k], Y[k], sl, below[k], theta
+        ):
+            continue
+        first = int(np.argmax(below.any(axis=1)))
+        grew = k > first and -low > 2 * float(-v[first].min())
+        found.append((-low / a[j], name, low, float(T[k]), grew, float(a[j])))
+    if not found:
+        return ""
+    found.sort(reverse=True)
+    _, name, low, t_low, grew, a = found[0]
+    others = [f[1] for f in found[1:]]
+    also = f" ({', '.join(repr(o) for o in others)} too)" if others else ""
+    return (
+        f"'{name}'{also} went negative (down to {low:.3g} at t = {t_low:g}"
+        f"{', and the negative part grew' if grew else ''}; -10 x atol = {-10 * a:.3g}). "
+        f"Either the solver let it undershoot (atol = {a:.3g} does not control values this "
+        f"small, and growth or selection can amplify them: use a smaller atol for '{name}'), or "
+        "a rate or diffusivity drives it below zero (check the formulas)."
+    )
+
+
+def _kept_nonnegative(cm, t, y, sl, cells, theta) -> bool:
+    """Whether the equations keep the state at ``sl`` from going below zero at ``cells``:
+    with every state raised to 0 where it is below, its rate there is not negative.
+    Infusions are left out (they only add)."""
+    if theta is None:
+        return False
+    y0 = np.maximum(np.asarray(y, dtype=np.float64), 0.0)
+    y0[sl] = np.where(cells, 0.0, y0[sl])
+    try:
+        f = np.asarray(cm.rhs(t, y0, theta))[sl][cells]
+    except Exception:  # noqa: BLE001 (a rate undefined at 0 decides nothing)
+        return False
+    return bool(np.all(np.isfinite(f)) and np.all(f >= 0))
+
+
+def warn_negative(cm: CompiledModel, sol: Solution, atol_states) -> None:
+    """Warn (``NegativeValuesWarning``) when a run's states went below -10 x atol."""
+    text = negative_tails(cm, sol.t, sol.y, atol_states, sol.theta)
+    if text:
+        warnings.warn(text, NegativeValuesWarning, skip_file_prefixes=(_PACKAGE,))
 
 
 @limited  # one BLAS thread for SuperLU (tenqsp._threads)
@@ -354,9 +437,13 @@ def solve(
                     )
                 if not hint:
                     hint = dose_hint(doses, b, float(np.min(atol_states)))
+                if not hint:
+                    hint = _tails_so_far(cm, out_t, out_y, a, y, res, atol_states, th)
+                why = str(res.message).rstrip()
+                if hint and not why.endswith("."):
+                    why += "."
                 raise SolverError(
-                    f"The solver failed between t = {a:g} and t = {b:g}{reached}: "
-                    f"{res.message}{hint}"
+                    f"The solver failed between t = {a:g} and t = {b:g}{reached}: {why}{hint}"
                 )
             stats["segments"] += 1
             if res.status != 1:  # reached b
@@ -431,7 +518,7 @@ def solve(
     sol = _solution(cm, T, Y, th, method, stats, messages, book, extinctions)
     sol.doses = doses
     sol.infusions = [(float(a), float(b), tg, float(r * f)) for a, b, tg, r, f in infused]
-    user_atol = float(atol_states) if atol_states.size == 1 else atol_states.copy()
+    user_atol = float(atol_states) if atol_states.ndim == 0 else atol_states.copy()
     sol.options = {
         "method": method,
         "backend": "scipy",
@@ -439,7 +526,23 @@ def solve(
         "atol": user_atol,
         "max_step": max_step,
     }
+    warn_negative(cm, sol, atol_states)
     return sol
+
+
+def _tails_so_far(cm, out_t, out_y, a, y, res, atol_states, th) -> str:
+    """``negative_tails`` of a failed run: the outputs so far, the state where the failing
+    segment started and the outputs the failed attempt reached, as a sentence for the error
+    message ("" if none)."""
+    n = cm.n_states
+    t_part = np.asarray(getattr(res, "t", ()), dtype=np.float64)
+    y_part = np.asarray(getattr(res, "y", np.zeros((len(y), 0))), dtype=np.float64)
+    if y_part.ndim != 2 or y_part.shape[1] != t_part.size:  # nothing usable reached
+        t_part, y_part = np.zeros(0), np.zeros((len(y), 0))
+    T = np.concatenate([*out_t, [a], t_part])
+    Y = np.concatenate([*(z[:, :n] for z in out_y), y[None, :n], y_part[:n].T])
+    text = negative_tails(cm, T, Y, atol_states, th)
+    return f" Before the failure, {text}" if text else ""
 
 
 def _formulas(cm, t_out, th, method, rtol, atol, max_step, regimen, initial) -> Solution:
