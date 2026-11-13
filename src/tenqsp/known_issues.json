@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
+  "issues": [
+    {
+      "id": "jax-large-dose-tiny-atol",
+      "title": "A large dose into a state near 0 with a very small atol can fail on the JAX solver",
+      "area": ["doses", "solver", "derivatives"],
+      "introduced": "0.6.0",
+      "fixed_in": null,
+      "changes_results": false,
+      "details": "With atol below about 1e-15 of the rise a dose causes, scipy often succeeds only through its Radau retry, which the JAX solver does not have, so the same run fails there with a SolverError (or NaN from sim.function). Results that are returned are right.",
+      "workaround": "Raise atol for the dosed states to about 1e-13 of the largest dose's rise, or check that m.diagnostics(sol) on the scipy run reports no Radau retries before asking for derivatives."
+    },
+    {
+      "id": "derivatives-later-dose-small-atol",
+      "title": "Derivatives failed just after a dose that is not at the start, with a small atol",
+      "area": ["derivatives", "doses"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.8.1",
+      "changes_results": false,
+      "details": "sim.function, sim.sensitivity and reverse derivatives stopped with 'required step size is less than spacing between numbers' just after a later dose when atol was about 1e-18 or below, also after a large dose moved late in a run.",
+      "workaround": "A larger atol."
+    },
+    {
+      "id": "second-derivatives-reverse",
+      "title": "Second derivatives with derivatives=\"reverse\" were wrong",
+      "area": ["derivatives"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.7.0",
+      "changes_results": true,
+      "details": "jax.hessian, or jax.jacfwd / jax.jacrev of jax.grad, of a function from sim.function gave wrong values with no warning when the function used reverse derivatives (the default in 0.6). With forward derivatives jax.hessian failed with an error.",
+      "workaround": "Upgrade, or check second derivatives against differences of the gradient."
+    },
+    {
+      "id": "transfer-fixed-slice-end",
+      "title": "m.transfer from or to one slice of a field moved one element's share only",
+      "area": ["model", "transfers"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.7.0",
+      "changes_results": true,
+      "details": "A transfer whose end fixes an axis by its slice, A.at(organ=\"liver\") -> B over drug and organ (or the reverse), gave or took one destination element's share instead of the sum over that axis, so the amount was not conserved, although explain() said it was.",
+      "workaround": "Upgrade; or write the transfer as a flux with an explicit sum."
+    },
+    {
+      "id": "jax-first-step-hang",
+      "title": "The JAX solver could run without end when the first step kept failing",
+      "area": ["solver"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.7.0",
+      "changes_results": false,
+      "details": "At values far outside a model's range (an optimizer's trial point with a huge rate constant), the step from t = 0 was halved to zero and the run never ended.",
+      "workaround": "Set max_steps, or bound the optimizer's values."
+    },
+    {
+      "id": "nan-after-later-dose",
+      "title": "sim.function gave NaN with status \"ok\" after a dose past the start",
+      "area": ["derivatives", "doses"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.6.1",
+      "changes_results": true,
+      "details": "When the model's rates are not defined below zero (a Hill term C^h with a non-integer h), the value could be NaN while the status said ok.",
+      "workaround": "Upgrade."
+    },
+    {
+      "id": "gradient-nan-extinction",
+      "title": "The gradient could be NaN in a model with an extinction group",
+      "area": ["derivatives", "extinction"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.6.1",
+      "changes_results": true,
+      "details": "jax.grad of a function from sim.function could be NaN while the value and forward derivatives were right, under the same condition as nan-after-later-dose.",
+      "workaround": "Upgrade, or use forward derivatives."
+    }
+  ]
+}

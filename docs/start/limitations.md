@@ -4,6 +4,9 @@ TenQSP refuses what it does not support, with a message, rather than doing somet
 different from what you meant. This page lists those limits in one place, so you don't have to
 find them one refusal at a time.
 
+Problems found in released versions, and their fixes, are a different list:
+`tq.known_issues()` and `tq.check_updates()` ([Install](install.md#known-issues-and-updates)).
+
 ## Models
 
 - **Every model is solved numerically.** There are no closed-form (analytical) solutions,
