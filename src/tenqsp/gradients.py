@@ -55,14 +55,22 @@ DERIVATIVES = ("auto", "forward", "reverse")
 FORWARD_MAX = 40  # "auto": forward sensitivities up to this many wrt numbers, reverse above
 # (design decision 2026-10-31: forward is cheaper below it for gradients, and for every
 # full Jacobian measured; docs/benchmarks.md, "Forward or reverse")
-RECORD_ROOM = 4  # the record holds 4x the steps of the run at the scenario's values,
-RECORD_ROOM_LARGE = 2  # 2x on models above LARGE_STATES (design decision 2026-10-25, design
-LARGE_STATES = 2_000  # note step4_5_sparse_tier.md §5.2: memory grows with states x room)
+RECORD_ROOM = 2  # the record holds 2x the steps of the run at the scenario's values, by
+# default (``record_room=``; design decision 2026-11-12, replacing 4x / 2x above 2,000 states:
+# memory grows with states x room, and a gradient at x0 uses only 1x)
+REUSE_WITHIN = 1.5  # a build whose record is at most this much larger is shared
 
 
-def record_room(n_states: int) -> int:
-    """How many times the steps of the run at x0 the record holds."""
-    return RECORD_ROOM_LARGE if n_states > LARGE_STATES else RECORD_ROOM
+def record_slots(k: int) -> int:
+    """The record's size for ``k`` steps: a power of two up to 128, then the next multiple of
+    a quarter of a power of two (128, 160, 192, 224, 256, 320, ...), so the room past ``k``
+    is at most a quarter more than asked, not up to double. Always a multiple of the
+    replay's block (32) from 128 on."""
+    k = max(1, int(k))
+    if k <= 128:
+        return jb.slots(k)
+    step = (1 << ((k - 1).bit_length() - 1)) // 4
+    return -(-k // step) * step
 
 
 RECORD_FULL = 100  # status: a run needing more steps than the record holds
@@ -97,7 +105,9 @@ class Function:
     (for checking that the tolerance is tight enough), with no new build or compile; see
     ``_tolerances``."""
 
-    def __init__(self, sim, scenario=None, *, wrt: Sequence[str], derivatives="auto"):
+    def __init__(
+        self, sim, scenario=None, *, wrt: Sequence[str], derivatives="auto", record_room=None
+    ):
         from tenqsp.simulate import Scenario
 
         derivatives = _derivatives_option(derivatives)
@@ -115,9 +125,17 @@ class Function:
         self._data = _data(run, where, regimen)
         self._n_t = run.t_out.size
         self.derivatives = _choose(derivatives, len(self.names))
+        self.record_room = _room_option(record_room, self.derivatives)
         need = _probe(cm, run, self._data, self.x0, self.derivatives)
+        self._need = need
         self._impl, self.capacity = _program_for(
-            cm, run.model_doses, self.derivatives, self.outputs, len(self.names), need
+            cm,
+            run.model_doses,
+            self.derivatives,
+            self.outputs,
+            len(self.names),
+            need,
+            self.record_room,
         )
 
     def __call__(self, x, *, rtol=None, atol=None) -> dict[str, jax.Array]:
@@ -130,6 +148,8 @@ class Function:
         data = _tolerances(self._data, rtol, atol)
         _, code, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         code = int(code)
+        if code == RECORD_FULL:
+            return _record_full_text(self.capacity, self._need, self.record_room)
         return "ok" if code == OK else _STATUS.get(code, f"status {code}")
 
     def steps(self, x, *, rtol=None, atol=None) -> int:
@@ -169,7 +189,7 @@ class FunctionBatch:
     ``sim.function``; a dose number must exist in every scenario.
     ``fs(X, rtol=..., atol=...)``: other tolerances for this call, as for ``sim.function``."""
 
-    def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto"):
+    def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto", record_room=None):
         from tenqsp.simulate import Scenario
 
         derivatives = _derivatives_option(derivatives)
@@ -219,12 +239,20 @@ class FunctionBatch:
                 )
         self._data = jax.tree.map(lambda *a: jnp.stack(a), *datas)
         self.derivatives = _choose(derivatives, len(names))
+        self.record_room = _room_option(record_room, self.derivatives)
         need = max(
             _probe(cm, run, d, x0, self.derivatives)
             for (run, _), d, x0 in zip(runs, datas, self.x0, strict=True)
         )
+        self._need = need
         impl, self.capacity = _program_for(
-            cm, runs[0][0].model_doses, self.derivatives, self.outputs, len(names), need
+            cm,
+            runs[0][0].model_doses,
+            self.derivatives,
+            self.outputs,
+            len(names),
+            need,
+            self.record_room,
         )
         key = ("batch", impl)
         if key not in cm._lazy:
@@ -254,8 +282,11 @@ class FunctionBatch:
     def status(self, X, *, rtol=None, atol=None) -> tuple[str, ...]:
         """``"ok"``, or why the run failed (its outputs are NaN), for each scenario."""
         _, codes, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+        full = _record_full_text(self.capacity, self._need, self.record_room or RECORD_ROOM)
         return tuple(
-            "ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}")
+            full
+            if int(c) == RECORD_FULL
+            else ("ok" if int(c) == OK else _STATUS.get(int(c), f"status {int(c)}"))
             for c in np.asarray(codes)
         )
 
@@ -311,6 +342,33 @@ def _derivatives_option(derivatives):
             f"not {derivatives!r}."
         )
     return derivatives
+
+
+def _room_option(record_room, derivatives: str):
+    """``record_room=``: None (the default, ``RECORD_ROOM``) or a number >= 1; reverse only."""
+    if record_room is None:
+        return RECORD_ROOM if derivatives == "reverse" else None
+    if isinstance(record_room, bool) or not isinstance(record_room, int | float):
+        raise TypeError(f"record_room= is a number (at least 1), not {record_room!r}.")
+    if not np.isfinite(record_room) or record_room < 1:
+        raise ValueError(f"record_room= is at least 1 (got {record_room}).")
+    if derivatives != "reverse":
+        how = "derivatives=False" if derivatives is False else f"derivatives='{derivatives}'"
+        raise ValueError(
+            f"record_room= sizes the record of reverse derivatives; this function uses {how}, "
+            "which keeps no record. Pass derivatives='reverse', or leave record_room out."
+        )
+    return float(record_room)
+
+
+def _record_full_text(capacity: int, need: int, room: float) -> str:
+    more = max(2, int(np.ceil(room * 2)))
+    return (
+        f"too many steps for the record: this run needs more than the {capacity:,} it holds "
+        f"({room:g}x the {need:,} of the run at x0). Make the function with "
+        f"record_room={more} (about {more / room:.2g}x the memory), or a new sim.function(...) "
+        "with x0 near this x (or at this tolerance); derivatives='forward' keeps no record"
+    )
 
 
 def _choose(derivatives, n_names: int):
@@ -370,7 +428,7 @@ def _probe(cm, run, data, x0, derivatives) -> int:
     return max(int(out["n_steps"]), int(out["segments"])) if steer else 0
 
 
-def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int):
+def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int, room=None):
     """The jitted program and the record's capacity (0 without a record)."""
     if cm.n_states == 0:
         return _formula_program(cm, model_doses, outputs, bool(derivatives)), 0
@@ -378,10 +436,18 @@ def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int):
         return _sens_program(cm, model_doses, outputs, p), 0
     if not derivatives:  # the solve alone: no record, no replay (step 4.6, decision 1)
         return _forward_program(cm, model_doses, outputs), 0
-    # the run at the scenario's values (steered as f's) sets the room in the record; it
-    # only ever grows, so later scenarios of this shape share the build
-    capacity = max(jb.slots(record_room(cm.n_states) * need), cm._lazy.get("function_capacity", 0))
-    cm._lazy["function_capacity"] = capacity
+    # the run at the scenario's values (steered as f's) sets the room in the record; a build
+    # of this shape whose record is a little larger (REUSE_WITHIN) is shared, not rebuilt
+    capacity = record_slots(int(np.ceil(room * need)))
+    built = sorted(
+        k[2]
+        for k in cm._lazy
+        if isinstance(k, tuple)
+        and k[:2] == ("jax_function", model_doses)
+        and k[3:] == (tuple(outputs), jb.tier(cm))
+        and capacity <= k[2] <= REUSE_WITHIN * capacity
+    )
+    capacity = built[0] if built else capacity
     return _function_program(cm, model_doses, capacity, outputs), capacity
 
 
@@ -934,11 +1000,15 @@ def _formula_program(cm, model_doses: bool, outputs, derivatives: bool):
     return jitted
 
 
-def function(sim, scenario=None, *, wrt, derivatives="auto") -> Function | FunctionBatch:
+def function(
+    sim, scenario=None, *, wrt, derivatives="auto", record_room=None
+) -> Function | FunctionBatch:
     """See ``function``."""
     if isinstance(scenario, list | tuple):
-        return FunctionBatch(sim, scenario, wrt=wrt, derivatives=derivatives)
-    return Function(sim, scenario, wrt=wrt, derivatives=derivatives)
+        return FunctionBatch(
+            sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room
+        )
+    return Function(sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room)
 
 
 def sensitivity(sim, scenario=None, *, wrt, relative: bool = False) -> Sensitivity:

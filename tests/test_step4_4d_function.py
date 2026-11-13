@@ -137,7 +137,9 @@ def test_a_run_needing_more_steps_than_the_record_holds_is_nan():
     f = sim.function(tq.Scenario(times=[10.0]), wrt=["w"], derivatives="reverse")
     assert np.isfinite(f(f.x0)["X"][0]) and np.isclose(f(f.x0)["X"][0], np.cos(10), atol=1e-6)
     fast = jnp.array([200.0])
-    assert f.status(fast).startswith("too many steps for the record (make a new sim.function(...)")
+    msg = f.status(fast)
+    assert msg.startswith("too many steps for the record: this run needs more than the")
+    assert "record_room=4" in msg and "a new sim.function(...) with x0 near this x" in msg
     assert np.isnan(f(fast)["X"][0])
     # forward sensitivities keep no record: the same x simply runs
     g = sim.function(tq.Scenario(times=[10.0]), wrt=["w"], derivatives="forward")

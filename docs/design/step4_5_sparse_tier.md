@@ -104,6 +104,13 @@ model, erlang scheme, rtol = atol = 1e-6, 0 → 24 h. In short:
      with that reason, as now). **Recommended.**
    - **C.** B, plus not keeping the full difference array per step (only what each step
      needs): a further cut, a few days' work; later if a real model needs it.
+
+   **Superseded 2026-11-12** (decision of the project lead, after the tumour-spheroid case
+   study needed more than 70 GB for one Jacobian on 1,062 states): 2x room on every model,
+   rounded up by at most a quarter (`record_slots`), set by `sim.function(...,
+   record_room=)`; the replay checkpoints blocks of 32 steps and stacks only the rows the
+   outputs read (a form of C). Measured: 20 GB and 16 min for 4 x 96 derivatives over
+   18,000 steps.
 3. **The scipy forward-sensitivity fallback** (ADR 0001 decision 4: "for very large
    sizes, forward sensitivities on the scipy path, for a handful of parameters"):
    **recommended: not built now.** The sparse tier gives exact gradients at 10,000 states

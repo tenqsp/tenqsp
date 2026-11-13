@@ -27,6 +27,23 @@ versioning; `0.x` releases may change the API.
   `explain()` says what the geometry changes. Model files are IR version 0.12 (older files
   still load). See the guide's "Spheres and cylinders".
 
+- **`record_room=` for reverse derivatives:** `sim.function(..., derivatives="reverse",
+  record_room=4)` sizes the record that reverse derivatives keep: this many times the steps of
+  the run at `f.x0` (default 2). A run at an `x` that needs more gives NaN as before, and
+  `f.status(x)` now says how much room it had and which `record_room` to ask for. Passing it
+  to a function without a record (forward derivatives, `derivatives=False`) raises.
+
+### Changed
+- **Reverse derivatives need much less memory:** the record holds 2 times the steps of the
+  run at `f.x0` on every model (was 4 times, 2 above 2,000 states), rounded up by at most a
+  quarter instead of to the next power of two; and the replay keeps only the start of each
+  block of 32 steps for the backward pass, recomputing the block from it. The derivatives of 4
+  outputs with respect to 96 dose times and amounts, for a 1,062-state model whose run takes
+  18,000 steps, needed more than 70 GB and now take 20 GB (and 16 minutes, against 85 for
+  forward derivatives); values and derivatives are unchanged. A run far from `x0`
+  meets "too many steps for the record" sooner than with the old 4 times: `record_room=4`
+  restores it.
+
 ### Fixed
 - **Derivatives with respect to a later dose, with a small `atol`:** `sim.function`,
   `sim.sensitivity` and the steering of reverse derivatives failed ("required step size is

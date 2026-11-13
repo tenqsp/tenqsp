@@ -385,7 +385,8 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
             z_next = jnp.where(valid & last, z_end, z_next)
             a_next = jnp.where(valid & last, e, a_next)
             new = (jnp.where(valid, Dn, D), jnp.where(valid, t_new, t), a, z_next, a_next)
-            return new, (Dn, t_new, h_abs, order_next)
+            # what the outputs read (``dense``: rows 0 to MAX_ORDER), not the whole array
+            return new, (Dn[: MAX_ORDER + 1], t_new, h_abs, order_next)
 
         y0 = cm._y0_impl(theta, geom)
         if y_start is not None:  # a given starting state: fixed, as in the run
@@ -432,7 +433,7 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
 
             def skip(c, x):
                 D, t = c[0], c[1]
-                return c, (D, t, jnp.ones_like(t), x[2])
+                return c, (D[: MAX_ORDER + 1], t, jnp.ones_like(t), x[2])
 
             used = x[0] < n_total
             row0 = (
@@ -448,8 +449,11 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
             x = jax.tree.map(lambda v, v0: jnp.where(used, v, v0), x, row0)
             return when(used, body, skip, c, x)
 
-        # checkpointed: reverse mode recomputes a step's Jacobian and LU rather than keeping
-        # an n x n factor per step
+        # checkpointed twice (step 4.8, memory): reverse mode keeps only each block's
+        # starting carry, recomputes the block's steps from it, and within the block
+        # recomputes a step's Jacobian and LU rather than keeping an n x n factor per step.
+        # Measured on a 1,062-state model, 6,709 steps: 2.5 GB of working memory for the
+        # gradient with steps checkpointed alone, 1.1 GB with blocks too.
         step = jax.checkpoint(body_or_skip)
         B = min(BLOCK, S)  # S is a multiple of BLOCK (or smaller than it)
 
@@ -461,7 +465,7 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
             def skip(c, xb):
                 D, t = c[0], c[1]
                 return c, (
-                    jnp.broadcast_to(D, (B, *D.shape)),
+                    jnp.broadcast_to(D[: MAX_ORDER + 1], (B, MAX_ORDER + 1, D.shape[1])),
                     jnp.broadcast_to(t, (B,)),
                     jnp.ones(B),
                     xb[2],
@@ -472,7 +476,7 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
         t0 = jnp.asarray(t0, dtype=jnp.float64)
         init = (D_init, t0, t0, z0, t0)
         xs_b = jax.tree.map(lambda v: v.reshape(S // B, B, *v.shape[1:]), xs)
-        (_, _, _, z_final, _), out_b = jax.lax.scan(block, init, xs_b)
+        (_, _, _, z_final, _), out_b = jax.lax.scan(jax.checkpoint(block), init, xs_b)
         Ds, ts, hs, os = jax.tree.map(lambda v: v.reshape(S, *v.shape[2:]), out_b)
 
         def output(j):

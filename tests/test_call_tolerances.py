@@ -37,8 +37,11 @@ def m():
 
 @pytest.mark.parametrize("derivatives", ["forward", "reverse", False])
 def test_a_call_at_other_tolerances_is_a_simulator_built_with_them(m, derivatives):
-    f = m.simulator(outputs=["conc"]).function(SC, wrt=["ka", "CL"], derivatives=derivatives)
-    tight = {"rtol": 1e-8, "atol": 1e-10}  # within the reverse record's room (see below)
+    room = {"record_room": 4} if derivatives == "reverse" else {}
+    f = m.simulator(outputs=["conc"]).function(
+        SC, wrt=["ka", "CL"], derivatives=derivatives, **room
+    )
+    tight = {"rtol": 1e-8, "atol": 1e-10}  # within that reverse record's room (see below)
     g = m.simulator(outputs=["conc"], **tight).function(
         SC, wrt=["ka", "CL"], derivatives=derivatives
     )
@@ -95,7 +98,7 @@ def test_several_scenarios(m):
 def test_a_much_tighter_tolerance_can_fill_the_reverse_record():
     """The record was sized at the simulator's tolerance: a run needing far more steps gives
     NaN and says so (forward derivatives keep no record, so they simply run)."""
-    # a model of its own: the record's room is kept per model build, and only grows
+    # a model of its own: a build of the same shape with a somewhat larger record is shared
     own = tq.Model.from_text(PK.replace("model pk", "model pk_record"))
     sim = own.simulator(outputs=["conc"], rtol=1e-3, atol=1e-3)
     f = sim.function(SC, wrt=["ka", "CL"], derivatives="reverse")

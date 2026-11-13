@@ -283,7 +283,7 @@ class Simulator:
         )
         return SimResult(sol, self.outputs, sc)
 
-    def function(self, scenario=None, *, wrt, derivatives="auto"):
+    def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None):
         """The simulation as a JAX function of the numbers named in ``wrt``, for estimation
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
@@ -301,6 +301,10 @@ class Simulator:
         ``jax.vmap``, a sweep) without differentiating: no record of the runs, so much less
         memory and 2-3x faster; differentiating it raises.
 
+        ``record_room=`` (reverse only): the record holds this many times the steps of the
+        run at ``f.x0`` (default 2; ``f.capacity``: its size in steps). A run at an ``x``
+        needing more gives NaN, and ``f.status(x)`` names the room to ask for.
+
         A list of scenarios (``sim.function([sc1, sc2, ...], wrt=...)``) gives one function
         of a table ``X`` (one row per scenario; ``fs.x0``): ``fs(X)`` ->
         ``{output: (scenarios, times, ...)}``, NaN past each scenario's own times
@@ -309,7 +313,7 @@ class Simulator:
         ``jax.vmap`` call of one build, padded exactly (slots at t = +inf)."""
         from tenqsp.gradients import function
 
-        return function(self, scenario, wrt=wrt, derivatives=derivatives)
+        return function(self, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room)
 
     def sensitivity(self, scenario: Scenario | None = None, *, wrt, relative: bool = False):
         """d output / d each name in ``wrt`` at every output time, at the scenario's values:
