@@ -207,6 +207,8 @@ def _check_replay(cm, t_span, options):
     from tenqsp.backends import jax_replay
     from tenqsp.backends.scipy_backend import SolverError
 
+    if cm.n_states == 0:  # a model given by formulas of t: no solver run to replay
+        return
     if cm.n_states > REPLAY_MAX_STATES:
         _V9["replay_skipped"] += 1
         return

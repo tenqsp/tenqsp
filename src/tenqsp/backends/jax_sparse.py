@@ -238,6 +238,7 @@ class _Assembled:
         self._J: dict = {}
         self._nnz = 0
         self._lock = threading.Lock()
+        self.assembled = 0  # Jacobians assembled (not found kept)
 
     def matrix(self, key, pieces, c):
         """``I - c J``, CSC."""
@@ -253,6 +254,7 @@ class _Assembled:
             J = kept[1]
         else:
             J = self.cm.assemble_sparse(pieces, ledger=self.ledger)
+            self.assembled += 1
             with self._lock:
                 old = self._J.pop(key, None)
                 self._nnz -= 0 if old is None else old[1].nnz

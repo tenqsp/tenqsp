@@ -20,7 +20,6 @@ import tenqsp as tq
 from tenqsp import _threads
 from tenqsp.backends import jax_backend as jb
 from tenqsp.backends import jax_sparse
-from tenqsp.compile import CompiledModel
 from tenqsp.examples import toy_phage_model
 
 T = np.linspace(0, 24, 25)
@@ -34,40 +33,40 @@ def sparse(monkeypatch):
 
 
 @pytest.fixture
-def calls(monkeypatch):
-    """The calls of ``CompiledModel.assemble_sparse``, counted in ``calls["n"]``."""
-    calls = {"n": 0}
-    assemble = CompiledModel.assemble_sparse
+def caches(monkeypatch):
+    """Every ``_Assembled`` the sparse tier makes, to read how many Jacobians each assembled
+    (counted there: a check that assembles Jacobians itself, ``pytest --jacobian``, is not)."""
+    made = []
 
-    def count(self, *args, **kwargs):
-        calls["n"] += 1
-        return assemble(self, *args, **kwargs)
+    class Recorded(jax_sparse._Assembled):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            made.append(self)
 
-    monkeypatch.setattr(CompiledModel, "assemble_sparse", count)
-    return calls
+    monkeypatch.setattr(jax_sparse, "_Assembled", Recorded)
+    return made
 
 
 def one_core_threads() -> set[int]:
     return {int(t) for t in os.listdir("/proc/self/task") if len(os.sched_getaffinity(int(t))) == 1}
 
 
-def test_a_jacobian_is_assembled_once_however_often_it_is_factorised(sparse, calls):
+def test_a_jacobian_is_assembled_once_however_often_it_is_factorised(sparse, caches):
     cm = toy_phage_model(4, 6).compile()
     j = jb.solve(cm, (0, 24), times=T)
     assert j.stats["nlu"] > 2 * j.stats["njev"]  # many factorisations per Jacobian
-    assert calls["n"] <= j.stats["njev"]
+    assert caches and sum(a.assembled for a in caches) <= j.stats["njev"]
     s = cm.solve((0, 24), times=T)
     for k in ("B", "P"):
         assert np.allclose(j[k], s[k], rtol=1e-5, atol=1e-6 * np.max(np.abs(s[k])))
 
 
-def test_the_kept_jacobian_gives_the_same_matrix_and_a_new_one_is_assembled(monkeypatch, calls):
+def test_the_kept_jacobian_gives_the_same_matrix_and_a_new_one_is_assembled(monkeypatch):
     cm = toy_phage_model(4, 6).compile()
     th = np.asarray(cm.theta0)
     y = np.asarray(cm.initial_state(th))
     pieces = [np.asarray(p) for p in cm.jacobian_pieces(0.0, y, th)]
     J = cm.assemble_sparse(pieces)
-    calls["n"] = 0
 
     def uncached(J, c):
         return (sps.eye_array(J.shape[0]) - c * J).toarray()
@@ -75,23 +74,21 @@ def test_the_kept_jacobian_gives_the_same_matrix_and_a_new_one_is_assembled(monk
     a = jax_sparse._Assembled(cm, False)
     for c in (0.1, 0.2, 0.3):
         assert np.array_equal(a.matrix(None, pieces, c).toarray(), uncached(J, c))
-    assert calls["n"] == 1
+    assert a.assembled == 1
     changed = [p.copy() for p in pieces]
     changed[0][0] *= 1.5
     J2 = cm.assemble_sparse(changed)
-    calls["n"] = 0
     assert np.array_equal(a.matrix(None, changed, 0.1).toarray(), uncached(J2, 0.1))
-    assert calls["n"] == 1
+    assert a.assembled == 2
     a.matrix(1, pieces, 0.1)  # one per member of a batch: both kept
     a.matrix(None, changed, 0.2), a.matrix(1, pieces, 0.2)
-    assert calls["n"] == 2
+    assert a.assembled == 3
     # past the budget nothing is kept, and every matrix is still right
     monkeypatch.setattr(jax_sparse._Assembled, "NNZ_BUDGET", 0)
     b = jax_sparse._Assembled(cm, False)
-    calls["n"] = 0
     for c in (0.1, 0.2):
         assert np.array_equal(b.matrix(None, pieces, c).toarray(), uncached(J, c))
-    assert calls["n"] == 2
+    assert b.assembled == 2
 
 
 def test_pinning_changes_nothing_but_where_the_work_runs(sparse, monkeypatch):

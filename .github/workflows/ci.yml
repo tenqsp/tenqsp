@@ -45,8 +45,11 @@ jobs:
         run: |
           ruff check src tests
           ruff format --check src tests
+      # GitHub's runners are 2-4x slower than the development machine, and the macOS ones
+      # vary run to run: on the full runs the per-test limit (120 s, there to catch a hang)
+      # is raised to 600 s, as for the slow tests and the JAX run below
       - name: Fast tests (on the full runs, Linux 3.12 also V12 and V7 over every compiled model)
-        run: pytest ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) && '--roundtrip --jacobian' || '' }}
+        run: pytest ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && (github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) && '--roundtrip --jacobian' || '' }} ${{ env.FULL == 'true' && '-o timeout=600' || '' }}
       - name: Slow tests (Mondays, tags, on demand)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && env.FULL == 'true'
         run: pytest -m slow -o timeout=900

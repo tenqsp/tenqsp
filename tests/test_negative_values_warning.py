@@ -100,6 +100,7 @@ def test_a_failure_after_a_dip_says_so(backend):
             m.solve((0, 3), backend=backend, **TOL)
 
 
+@pytest.mark.scipy_backend  # under --backend=jax the caller is the suite's own wrapper
 def test_it_is_a_user_warning_that_points_at_the_caller():
     assert issubclass(tq.NegativeValuesWarning, UserWarning)
     with warnings.catch_warnings(record=True) as caught:
