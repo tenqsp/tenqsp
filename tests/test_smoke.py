@@ -8,7 +8,7 @@ import tenqsp
 
 
 def test_version():
-    assert tenqsp.__version__ == "0.8.1"
+    assert tenqsp.__version__ == "0.8.2.dev0"
 
 
 def test_float64_enabled():
