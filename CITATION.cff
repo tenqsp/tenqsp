@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use TenQSP in your work, please cite it as below."
 title: "TenQSP: structured-population PDEs for quantitative systems pharmacology, in JAX"
 type: software
-version: "0.8.0"
-date-released: "2026-11-09"
+version: "0.8.1"
+date-released: "2026-11-14"
 doi: "10.5281/zenodo.23804658"
 identifiers:
   - type: doi

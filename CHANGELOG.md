@@ -5,6 +5,8 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-14
+
 ### Added
 - **A warning when values go negative:** a run (`m.solve`, `sim(...)`, either backend) whose
   state went below −10 × `atol` warns with `tq.NegativeValuesWarning`, naming the state, how
