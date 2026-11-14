@@ -54,6 +54,9 @@ def test_a_derivative_that_starts_after_a_dose_with_a_small_atol(name):
 LATE = SURFACE.replace("n=6", "n=20 geometry=spherical").replace("k=0.7", "k=0.02")
 
 
+# the reference runs (atol=1e-14 after a large dose) need scipy's Radau retry, which the JAX
+# solver does not have (known issue jax-large-dose-tiny-atol)
+@pytest.mark.scipy_backend
 def test_a_large_dose_moved_late_in_the_run_with_a_small_atol():
     # dose 2 at t = 900: the direction moves it in proportion to its value, so its derivative
     # is huge next to the surface and tiny a few cells in, below the rounding of the solve

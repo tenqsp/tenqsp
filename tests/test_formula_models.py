@@ -50,6 +50,7 @@ def test_solve_evaluates_the_formulas_at_the_output_times():
     np.testing.assert_array_equal(m.solve((0, 52), times=[1, 2], params={"prog": 3})["E"], [53, 56])
 
 
+@pytest.mark.scipy_backend  # names both backends: under --backend=jax both are JAX
 def test_both_backends_and_any_tolerance_give_the_formulas_exactly():
     m = tq.Model.from_text(SINGLE_DOSE)
     want = closed_form(TIMES)
