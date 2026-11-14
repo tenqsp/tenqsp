@@ -10,6 +10,13 @@ everything else on the machine. So TenQSP sets BLAS to ``BLAS_THREADS`` threads 
 factors and solves, and restores the previous setting after (via ``threadpoolctl``).
 
 ``tenqsp._threads.BLAS_THREADS = None`` leaves BLAS as it is.
+
+The JAX backend's sparse tier does its host work (factorisations and solves) on one thread
+of its own (``jax_sparse``). ``PIN_HOST_THREAD = True`` (the default, Linux only) keeps that
+thread on one core, the one it starts on. On a machine whose idle cores run at a low clock
+(the ``ondemand`` governor), a thread woken thousands of times a second otherwise lands on
+cold cores: measured on a 1,062-state model, each factorisation took twice as long, and the
+run 62 s instead of 29 s. Only TenQSP's own thread is pinned; ``False`` releases it.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import contextlib
 import functools
 
 BLAS_THREADS: int | None = 1
+PIN_HOST_THREAD: bool = True
 _CONTROLLER = None  # made on first use, after scipy has loaded its BLAS
 
 
@@ -45,3 +53,14 @@ def limited(fn):
             return fn(*args, **kwargs)
 
     return wrapper
+
+
+def current_cpu() -> int | None:
+    """The core the calling thread runs on (Linux), or None where that cannot be read."""
+    try:
+        import ctypes
+
+        cpu = ctypes.CDLL(None).sched_getcpu()
+    except (OSError, AttributeError):
+        return None
+    return cpu if cpu >= 0 else None

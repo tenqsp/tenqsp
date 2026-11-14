@@ -260,6 +260,12 @@ solve used 3,400 CPU-seconds in 54 s. TenQSP therefore runs BLAS on one thread w
 factors and solves (34 s, 38 CPU-seconds), and restores your setting afterwards.
 `tenqsp._threads.BLAS_THREADS = None` turns this off.
 
+**One core for a large JAX run.** On Linux, a single JAX run of a model above about 1,000
+states keeps its factorisations and solves on one core while it lasts, and gives the threads
+their cores back when it ends (a 1,062-state run: 27 s, against 62 s with the work moving
+between idle, low-clock cores). Batches are not affected.
+`tenqsp._threads.PIN_HOST_THREAD = False` turns this off.
+
 ## Backends
 
 Every solve, simulator and scenario runs on one of two solvers. Both use BDF and give the

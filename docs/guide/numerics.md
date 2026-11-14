@@ -440,6 +440,14 @@ thread per core, its idle threads spin and slow the whole machine for no gain. T
 therefore runs BLAS on one thread while it factorises and solves, and restores your setting
 afterwards. `tenqsp._threads.BLAS_THREADS = None` turns this off.
 
+On the JAX backend, a model large enough for the sparse LU (above about 1,000 states) does
+its factorisations and solves outside JAX, thousands of times a run. On Linux, while one
+such run lasts, TenQSP keeps that work on one core, and gives every thread its cores back
+when the run ends. On a machine whose idle cores run at a low clock (the `ondemand`
+governor) the work otherwise moves between cold cores: a 1,062-state run took 62 s instead
+of 27 s. Batches and runs in several Python threads at once are left alone.
+`tenqsp._threads.PIN_HOST_THREAD = False` turns this off.
+
 For several runs at once, use several processes (`sim.batch(..., n_jobs=8)`, see
 [Simulation and exploration](simulation.md)) rather than threads.
 
