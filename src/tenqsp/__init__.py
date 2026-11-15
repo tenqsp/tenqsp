@@ -72,7 +72,7 @@ from .simulate import Scenario, SimResult, Simulator  # noqa: E402
 from .updates import check_updates, known_issues  # noqa: E402
 from .validate import ModelError, validate  # noqa: E402
 
-__version__ = "0.8.2"
+__version__ = "0.8.3.dev0"
 
 __all__ = [
     "__version__",
