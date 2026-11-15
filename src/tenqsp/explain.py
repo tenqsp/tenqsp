@@ -809,6 +809,8 @@ def _shared_terms(M: _Model) -> tuple[list[str], list[str]]:
                 if x not in held:
                     held[x] = sp.Dummy()
                 return held[x]
+            if isinstance(x, sp.Piecewise):  # its (value, condition) pairs stay pairs
+                return sp.Piecewise(*((atoms(c.expr), c.cond) for c in x.args))
             return x.func(*(atoms(a) for a in x.args))
 
         def reads(x: sp.Expr) -> bool:
@@ -1096,6 +1098,9 @@ def _covers(M: _Model, name: str, wheres) -> bool:
 
 
 def _extinctions(ir: ModelIR) -> list[str]:
+    from .validate import fed_from_outside
+
+    fed = fed_from_outside(ir)
     out = []
     for e in ir.extinctions:
         members = ", ".join(_label(m, e.member_where(i)) for i, m in enumerate(e.group))
@@ -1110,6 +1115,18 @@ def _extinctions(ir: ModelIR) -> list[str]:
                 f" Noise floor: while the group's total is below {e.threshold:g}, the "
                 "equations treat the whole group as 0 (stops ghost populations made by solver "
                 "round-off from growing)."
+            )
+        if not fed[e.name]:
+            text += (
+                " Nothing outside the group adds to it, so once extinct it stays at 0: the "
+                f"equations treat it as 0 until it is back at {e.threshold:g}, so solver "
+                "round-off cannot bring it back (a run that doses into it keeps its equations "
+                "instead)."
+            )
+        else:
+            text += (
+                " Something outside the group adds to it, so after an extinction it follows "
+                "its equations."
             )
         out += _wrap(text, "  ")
     return out
@@ -1141,6 +1158,16 @@ def _safeguards(ir: ModelIR, report: Report) -> list[str]:
     floors = [e.name for e in ir.extinctions if e.noise_floor]
     if floors:
         out.append(f"  Noise floors (declared): {', '.join(floors)} (see Extinction groups).")
+    if ir.extinctions:
+        from .validate import fed_from_outside
+
+        held = [name for name, f in fed_from_outside(ir).items() if not f]
+        if held:
+            out += _wrap(
+                f"Extinct groups held at 0 (nothing outside feeds them): {', '.join(held)} "
+                "(see Extinction groups).",
+                "  ",
+            )
     cellwise = [
         i for i in report.notes if "cell by cell" in i.message or "where it stands" in i.message
     ]

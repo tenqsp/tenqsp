@@ -460,3 +460,76 @@ def test_a_noise_floor_in_a_model_with_a_condition_on_time(backend):
     assert np.asarray(sol["B"])[3] == 0.0
     ((t_ext, name),) = sol.extinctions
     assert name == "cells" and t_ext == pytest.approx(np.log(100) / 0.5, rel=1e-6)
+
+
+PREY = """model prey_predator
+axis l in [0, 1] n=4 kind=one_way
+param g = 0.8, k = 3e-9, b = 50, v = 2, e = 0.3
+field I(l)
+compartment B
+compartment P
+d_t(B) = g*B - k*P*B
+d_t(I) = k*P*B*point(l, at=0) - d_l(v*I)
+    at l=1: outflow
+d_t(P) = -k*P*B + b*v*I(l=1) - e*P
+B(0) = 1e8
+P(0) = 1e9
+extinction prey: B below 1
+"""
+
+
+@pytest.mark.parametrize("backend", ["scipy", "jax"])
+def test_an_extinct_group_that_nothing_feeds_stays_at_zero(backend):
+    """Decision R6 (2026-11-15): B = 0 is an exact equilibrium of d_t(B) = (g - k P) B, and
+    nothing outside B adds to it. After its extinction the solver's linear algebra used to put
+    round-off (1e-26) back into B, which grew once the predator had decayed (g > k P): -3e4
+    at 96 h. Oracle: exactly 0 after the extinction."""
+    m = tq.Model.from_text(PREY)
+    assert m.compile().extinction_groups[0].stays_extinct
+    t = np.array([2.0, 12, 24, 48, 72, 96])
+    sol = m.solve((0, 96), times=t, backend=backend, rtol=1e-6, atol=1e-9)
+    ((t_ext, name),) = sol.extinctions
+    assert name == "prey" and t_ext < t[0]
+    assert np.all(np.asarray(sol["B"]) == 0.0)
+    assert "stays at 0" in m.explain() and "held at 0" in m.explain()
+
+
+@pytest.mark.parametrize("backend", ["scipy", "jax"])
+def test_a_dose_into_a_group_that_stays_extinct_follows_its_equation(backend):
+    """A run that doses into the group keeps its equations: 0.5 (below the threshold of 1)
+    given at t = 30, after the extinction, grows as 0.5 exp(r (t - 30)) and is armed at 1."""
+    text = (
+        "model regrow\nparam r = 0.2, kill = 1.0\ncompartment B\n"
+        "d_t(B) = r*B - kill*(1 if t < 20 else 0)*B\nB(0) = 100\n"
+        "extinction cells: B below 1\n"
+    )
+    m = tq.Model.from_text(text)
+    t = np.array([25.0, 31, 32])
+    sol = m.solve((0, 32), times=t, regimen=tq.bolus("B", 0.5, times=[30]), backend=backend,
+                  **TIGHT)  # fmt: skip
+    ((t_ext, _),) = sol.extinctions
+    assert t_ext == pytest.approx(np.log(100) / 0.8, rel=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(sol["B"]), [0.0, 0.5 * np.exp(0.2), 0.5 * np.exp(0.4)], rtol=1e-7
+    )
+
+
+@pytest.mark.parametrize("backend", ["scipy", "jax"])
+def test_a_group_fed_from_outside_follows_its_equations_after_an_extinction(backend):
+    """A source s from outside keeps the group's own dynamics after an extinction (a floor
+    would also hide its growth). Oracle: after the extinction at t_e, dB/dt = s - 0.8 B until
+    t = 20, so B(20) = (s/0.8)(1 - exp(-0.8 (20 - t_e))), then dB/dt = s + 0.2 B, so
+    B(25) = (B(20) + s/0.2) e - s/0.2, still below the threshold."""
+    s = 0.01
+    m = tq.Model.from_text(
+        f"model fed\nparam r = 0.2, kill = 1.0, s = {s}\ncompartment B\n"
+        "d_t(B) = s + r*B - kill*(1 if t < 20 else 0)*B\nB(0) = 100\n"
+        "extinction cells: B below 1\n"
+    )
+    assert not m.compile().extinction_groups[0].stays_extinct
+    assert "follows its equations" in m.explain() and "held at 0" not in m.explain()
+    sol = m.solve((0, 25), times=[25.0], backend=backend, **TIGHT)
+    ((t_e, _),) = sol.extinctions
+    b20 = s / 0.8 * (1 - np.exp(-0.8 * (20 - t_e)))
+    expected = (b20 + s / 0.2) * np.e - s / 0.2
+    assert float(np.asarray(sol["B"])[-1]) == pytest.approx(expected, rel=1e-6)

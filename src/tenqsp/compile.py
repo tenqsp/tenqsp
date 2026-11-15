@@ -71,7 +71,7 @@ from tenqsp.operators import (
     robin_flux,
     upwind_end_flux,
 )
-from tenqsp.validate import validate, validate_values
+from tenqsp.validate import fed_from_outside, validate, validate_values
 
 
 def _validate(ir: ModelIR, stacklevel: int = 4) -> None:
@@ -272,13 +272,23 @@ class _Boundary:
 @dataclasses.dataclass(frozen=True)
 class ExtinctionGroup:
     """A compiled extinction group: ``members`` marks its states; its total amount is
-    ``(members * measure(theta)) @ y``."""
+    ``(members * measure(theta)) @ y``. ``fed``: something outside the group can add to it
+    (``validate.fed_from_outside``); an unfed group stays extinct (``CompiledModel._floors``)."""
 
     name: str
     group: tuple[str, ...]
     threshold: float
     members: np.ndarray
     noise_floor: bool
+    fed: bool = True
+
+    @property
+    def stays_extinct(self) -> bool:
+        """After an extinction, held at zero until it reaches its threshold again (a dose into
+        it in the run lifts this): nothing outside feeds it, so its own equations keep it at
+        exactly 0, and only round-off (the solver's linear algebra mixes the rows of other
+        states into its own) could bring it back."""
+        return not self.fed
 
 
 def implicit_shift(g, root):
@@ -312,14 +322,18 @@ class CompiledModel:
             {c.name: plan.parse(c.volume) for c in ir.compartments if c.volume is not None}
         )
         self.cell_widths = self._cell_widths()
+        fed = fed_from_outside(ir) if ir.extinctions else {}
         self.extinction_groups = tuple(
             ExtinctionGroup(
-                e.name, e.group, float(e.threshold), self._member_mask(e), e.noise_floor
+                e.name, e.group, float(e.threshold), self._member_mask(e), e.noise_floor,
+                fed[e.name],
             )
             for e in ir.extinctions
-        )
+        )  # fmt: skip
         self._parse_slices_and_transfers()
-        self._floors = [g for g in self.extinction_groups if g.noise_floor]
+        # groups that can be seen as zero: with a noise floor (while disarmed), or that stay
+        # extinct (after an extinction, until armed again)
+        self._floors = [g for g in self.extinction_groups if g.noise_floor or g.stays_extinct]
         self._parse_terms()
         self._parse_inits_doses_observables()
         self._label_ledger()
@@ -352,15 +366,16 @@ class CompiledModel:
     @property
     def n_theta(self) -> int:
         """Length of theta: the parameters, plus one slot for the segment time of conditions
-        on time when the model has any (ADR 0006), plus one per noise-floor group (whether
-        the solver has it floored, ADR 0005)."""
+        on time when the model has any (ADR 0006), plus one per group that can be floored
+        (whether the solver has it floored, ADR 0005)."""
         return self.params.size + (self.plan.switch_slot is not None) + len(self._floors)
 
     @property
     def floor_slots(self) -> list[int]:
-        """One theta slot per noise-floor group, after the time slot: 1 while the group is
-        floored, 0 while it counts, NaN outside a solve (then decided by its total). Worked
-        out when asked: the time slot is known only once the conditions on time are parsed."""
+        """One theta slot per group that can be floored (``_floors``), after the time slot:
+        1 while the group is floored, 0 while it counts, NaN outside a solve (``_apply_floor``).
+        Worked out when asked: the time slot is known only once the conditions on time are
+        parsed."""
         first = self.params.size + (self.plan.switch_slot is not None)
         return [first + j for j in range(len(self._floors))]
 
@@ -1207,14 +1222,19 @@ class CompiledModel:
     def _apply_floor(self, y, theta, geom):
         """Noise floor: a floored group is seen as zero by every equation. Its own
         rates are computed from that zero, so sources from outside still add to it, but it
-        cannot feed itself. During a solve a group is floored while it is disarmed (it has
-        not reached its threshold since the start or its last extinction), held in its theta
+        cannot feed itself. During a solve a group with a noise floor is floored while it is
+        disarmed (it has not reached its threshold since the start or its last extinction),
+        and a group that stays extinct while disarmed after an extinction, held in its theta
         slot; the floor therefore switches only where the solver stops anyway (ADR 0005).
-        Outside a solve (slot NaN) it is floored while its total is below the threshold."""
+        Outside a solve (slot NaN) a group with a noise floor is floored while its total is
+        below the threshold, and a group that stays extinct is not."""
         w = self._measure_impl(theta, geom)
         for g, slot in zip(self._floors, self.floor_slots, strict=True):
             flag = theta[slot]
-            by_total = jnp.dot(w * jnp.asarray(g.members), y) < g.threshold
+            if g.noise_floor:
+                by_total = jnp.dot(w * jnp.asarray(g.members), y) < g.threshold
+            else:
+                by_total = False
             below = jnp.where(jnp.isnan(flag), by_total, flag > 0.5)
             y = jnp.where(jnp.asarray(g.members) & below, 0.0, y)
         return y

@@ -1472,7 +1472,11 @@ class Model:
         *armed* once its total reaches the threshold; an armed group crossing it downward is
         set to zero at the exact crossing (``sol.extinctions``, and an ``extinction`` line in
         the ledger) and disarmed. A group that has never reached the threshold (e.g. mutants
-        seeded from zero) is never touched.
+        seeded from zero) is never touched. Once extinct, a group that nothing outside it
+        feeds (no reaction or rate that does not vanish with it, no switch or mutation into
+        it, no inflow or transfer) stays extinct: every equation sees it as zero until it is
+        back at the threshold, so round-off cannot bring it back; a run that doses into it
+        keeps its equations. ``explain()`` lists these groups.
 
         ``noise_floor=True``: while the group's total is below the threshold, every equation
         sees the whole group as zero. Its sources still add to it, but round-off "ghost"

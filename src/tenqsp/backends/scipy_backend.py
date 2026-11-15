@@ -347,12 +347,19 @@ def solve(
     y = apply(t0, np.concatenate([y, np.zeros(n_q)]))
     groups = cm.extinction_groups
     armed = [False] * len(groups)
+    died = [False] * len(groups)
     floor_of = dict(zip((g.name for g in cm._floors), cm.floor_slots, strict=True))
+    # a group this run doses into keeps its own dynamics after an extinction
+    dosed = {i for ev in events.values() for i, _ in ev} | {i for *_, i, _ in infusion_rates}
+    holds = [g.stays_extinct and not any(g.members[i] for i in dosed if i < n) for g in groups]
 
-    def set_armed(i, value):  # a floored group counts (no floor) exactly while it is armed
+    def set_armed(i, value):
+        """A group counts (no floor) while it is armed; disarmed, a group with a noise floor
+        is floored, and a group that stays extinct is once it has died (ADR 0005)."""
         armed[i] = value
         if groups[i].name in floor_of:
-            th[floor_of[groups[i].name]] = 0.0 if value else 1.0
+            floored = not value and (groups[i].noise_floor or (holds[i] and died[i]))
+            th[floor_of[groups[i].name]] = 1.0 if floored else 0.0
 
     def arm(y):  # a group reaching its threshold (start, doses) is armed
         totals = cm.group_totals(y, th) if groups else ()
@@ -391,6 +398,7 @@ def solve(
             amount = float(y[sl][part] @ measure[sl][part])
             removed.append((te, member, -amount))
             y[sl] = np.where(part, 0.0, y[sl])
+        died[i] = True
         set_armed(i, False)
         extinctions.append((te, g.name))
         stats["extinctions"] += 1

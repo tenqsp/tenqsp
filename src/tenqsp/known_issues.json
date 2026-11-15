@@ -3,6 +3,16 @@
   "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
   "issues": [
     {
+      "id": "extinct-group-regrows-from-round-off",
+      "title": "An extinct population could come back from solver round-off",
+      "area": ["extinction"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.8.3",
+      "changes_results": true,
+      "details": "After an extinction group was set to 0, the solver's linear algebra could put round-off (about 1e-26) back into it even though nothing fed it; if its net growth later turned positive (the predator or drug gone), it grew back into a population, up to thousands per mL, with no error. Groups with noise_floor were not affected.",
+      "workaround": "Declare the group with noise_floor when nothing outside it can feed it and it starts at 0 or at its threshold or above."
+    },
+    {
       "id": "small-derivatives-state-accuracy",
       "title": "Derivatives much smaller than their state were inaccurate on the JAX solver",
       "area": ["derivatives"],
@@ -21,6 +31,16 @@
       "changes_results": true,
       "details": "In a model with any condition on time (... if t < 10 else ...), every extinction group with noise_floor was seen as zero from the start: its members neither changed nor fed the rest of the model, on either backend, with no error. Models without a condition on time, and groups without noise_floor, were not affected.",
       "workaround": "Leave noise_floor out of such a model's extinction groups."
+    },
+    {
+      "id": "explain-condition-on-time",
+      "title": "explain() failed on a rate containing a condition on time",
+      "area": ["model"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.8.3",
+      "changes_results": false,
+      "details": "m.explain() stopped with \"TypeError: ExprCondPair.__new__() missing 2 required positional arguments\" for a model whose rates contain a condition on time, such as kill*(1 if t < 20 else 0)*B. Solving was not affected.",
+      "workaround": "Read the model with m.to_text() instead."
     },
     {
       "id": "jax-large-dose-tiny-atol",

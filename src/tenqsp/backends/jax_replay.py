@@ -201,7 +201,6 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
     members = np.array([g.members for g in groups], dtype=bool).reshape(G, n)
     thr = np.array([g.threshold for g in groups], dtype=np.float64)
     E = len(cm.switch_events)
-    floor_group = np.array([i for i, g in enumerate(groups) if g.noise_floor], dtype=np.int64)
     floor_slot = np.array(cm.floor_slots, dtype=np.int64)
 
     def program(
@@ -254,8 +253,8 @@ def _replay_program(cm: CompiledModel, model_doses: bool):
         def segment(k):  # theta, infusion input and start of segment k
             mid = segs["mid"][k]
             th = theta if slot is None else theta.at[slot].set(mid)
-            if floor_group.size:
-                th = th.at[floor_slot].set(jnp.where(segs["armed"][k][floor_group], 0.0, 1.0))
+            if floor_slot.size:  # as the run had them (jax_backend: floored)
+                th = th.at[floor_slot].set(jnp.where(segs["floored"][k], 1.0, 0.0))
             on = (i_start <= mid) & (mid < i_stop)
             u = jnp.zeros(n).at[i_index].add(jnp.where(on, i_rise, 0.0))
             return th, u
