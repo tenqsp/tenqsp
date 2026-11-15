@@ -149,12 +149,14 @@ s.table()            # a pandas DataFrame: one row per time, one column per (out
      counts as a Newton failure (fresh Jacobian, then a halved step);
    - its error, with the state's `rtol` and `atol`, enters the error test and the order
      choice as the larger of the two norms (CVODES with `errconS`);
-     its scale is `atol + rtol (|s| + |y|)` (2026-11-12: with `atol + rtol |s|` alone, a
-     derivative that starts from 0 after a dose while the state does not, inside a field
-     the dose reaches through its neighbours, failed every step once `atol` was small;
-     `tests/test_forward_sens_scale.py`); plus a floor at `SENS_FLOOR` = 1e-12 of the
-     direction's largest entry (2026-11-12: after a large dose moved late in a run, entries a
-     few cells from the surface were below the rounding of the solve);
+     its scale is `atol + rtol |s|` plus a floor at `SENS_FLOOR` = 1e-12 of the direction's
+     largest entry (2026-11-12: without the floor, a derivative that starts from 0 after a
+     dose, inside a field the dose reaches through its neighbours, and the entries a few
+     cells from the surface after a large dose moved late in a run, were below the rounding
+     of the solve and failed every step once `atol` was small;
+     `tests/test_forward_sens_scale.py`). 0.8.1 also added `rtol |y|` to the scale; a
+     derivative much smaller than its state was then resolved only to `rtol` of the state,
+     which made standard errors fail (removed 2026-11-15; `test_a_small_derivative_is_resolved_to_its_own_rtol`);
    - across a dose or infusion boundary it gets the dose's change and the jump of the
      right-hand side times how fast the boundary moves; across an event it is kept as it
      is (zero for a group zeroed there). It only chooses steps; the derivatives themselves

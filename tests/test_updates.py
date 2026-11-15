@@ -122,8 +122,8 @@ def test_versions_sort_as_releases_do():
 def test_known_issues_lists_the_problems_of_the_installed_version(monkeypatch, capsys):
     monkeypatch.setattr(updates, "_installed", lambda: "0.6.0")
     found = tq.known_issues(show=False)
-    every = updates._shipped()["issues"]
-    assert {i["id"] for i in found} == {i["id"] for i in every}  # all from 0.6.0 on
+    every = [i for i in updates._shipped()["issues"] if i["introduced"] == "0.6.0"]
+    assert {i["id"] for i in found} == {i["id"] for i in every}  # those 0.6.0 already had
     assert [i["changes_results"] for i in found] == sorted(
         (i["changes_results"] for i in found), reverse=True
     )  # those that can change results first

@@ -321,10 +321,6 @@ class CompiledModel:
         self._parse_slices_and_transfers()
         self._floors = [g for g in self.extinction_groups if g.noise_floor]
         self._parse_terms()
-        # one theta slot per noise-floor group, after the time slot: 1 while the group is
-        # floored, 0 while it counts, NaN outside a solve (then decided by its total)
-        first = self.params.size + (self.plan.switch_slot is not None)
-        self.floor_slots = [first + j for j in range(len(self._floors))]
         self._parse_inits_doses_observables()
         self._label_ledger()
         self.compile_seconds: float | None = None
@@ -359,6 +355,14 @@ class CompiledModel:
         on time when the model has any (ADR 0006), plus one per noise-floor group (whether
         the solver has it floored, ADR 0005)."""
         return self.params.size + (self.plan.switch_slot is not None) + len(self._floors)
+
+    @property
+    def floor_slots(self) -> list[int]:
+        """One theta slot per noise-floor group, after the time slot: 1 while the group is
+        floored, 0 while it counts, NaN outside a solve (then decided by its total). Worked
+        out when asked: the time slot is known only once the conditions on time are parsed."""
+        first = self.params.size + (self.plan.switch_slot is not None)
+        return [first + j for j in range(len(self._floors))]
 
     def _with_slot(self, th: np.ndarray) -> np.ndarray:
         extra = self.n_theta - self.params.size

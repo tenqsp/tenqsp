@@ -33,9 +33,9 @@ its own difference array, rescaled and updated with the state's; after each conv
 solve its corrector (linear) is solved with the same factorised matrix, iterated as Newton
 is (no convergence: as a Newton failure); its error enters the error test and the order
 choice (the larger of the two norms, as CVODES with ``errconS``), on the scale
-``atol + rtol (|s| + |y|)`` and a floor at ``SENS_FLOOR`` of its largest entry
-(``_sens_scale``). So a solution at rest whose derivative is not
-cannot take steps too coarse for the derivative.
+``atol + rtol |s|`` with a floor at ``SENS_FLOOR`` of its largest entry (``_sens_scale``).
+So a solution at rest whose derivative is not cannot take steps too coarse for the
+derivative.
 """
 
 from __future__ import annotations
@@ -175,20 +175,19 @@ DENSE = LinearSolver(
 SENS_FLOOR = 1e-12
 
 
-def _sens_scale(atol_s, rtol, s, y, p):
-    """The error scale of the carried derivative ``s`` (``p`` directions side by side) at the
-    state ``y``: ``atol + rtol (|s| + |y|) + SENS_FLOOR max|s|`` (the largest entry of the
-    same direction). Each direction moves its number in proportion to its value, so ``s`` is
-    in the state's units (the change for a 100 % change); it is asked to be as accurate as
-    the state itself (``rtol |y|``) and to ``rtol`` of its own size. ``rtol |y|`` matters
-    where a derivative starts from 0 while the state does not (just after a dose, inside a
-    field the dose reaches through its neighbours): its first steps have an error estimate as
-    large as itself. The floor matters just after a large dose moved in time: the derivative
-    is then huge next to where the dose enters and tiny a few cells away, where rounding in
-    the solve is larger than ``rtol`` of its value, and shorter steps only make it worse.
-    Without either, a small ``atol`` failed every step."""
+def _sens_scale(atol_s, rtol, s, p):
+    """The error scale of the carried derivative ``s`` (``p`` directions side by side):
+    ``atol + rtol |s| + SENS_FLOOR max|s|`` (the largest entry of the same direction), so
+    each derivative is resolved to ``rtol`` of its own size, as CVODES does. The floor
+    matters where a derivative is tiny next to its own largest entry: just after a dose, inside
+    a field the dose reaches through its neighbours, the derivative starts from 0 a few cells
+    away, and just after a large dose moved in time it is huge where the dose enters; there
+    rounding in the solve is larger than ``rtol`` of its value, and shorter steps only make it
+    worse. Without the floor, a small ``atol`` failed every step. (0.8.1 also added
+    ``rtol |y|``, the state's own accuracy; a derivative much smaller than its state was then
+    resolved only to that, which spoiled standard errors: removed in 0.8.2.)"""
     big = jnp.repeat(jnp.max(jnp.abs(s.reshape(p, -1)), axis=1), s.shape[0] // p)
-    return atol_s + rtol * (jnp.abs(s) + jnp.tile(jnp.abs(y), p)) + SENS_FLOOR * big
+    return atol_s + rtol * jnp.abs(s) + SENS_FLOOR * big
 
 
 def _rms(x):
@@ -537,7 +536,7 @@ def bdf(
         nfev = c.nfev + n_iter
         if carry_s:  # the derivative's corrector, with the same matrix (module docstring)
             s_predict, psi_s = predict(Ds, order)
-            scale_s = _sens_scale(atol_s, rtol, s_predict, y_predict, p)
+            scale_s = _sens_scale(atol_s, rtol, s_predict, p)
             conv_s, n_iter_s, s_new, ds = when(
                 converged,
                 lambda: _newton(
@@ -567,7 +566,7 @@ def bdf(
         scale_new = atol + rtol * jnp.abs(y_new)
         error_norm = _rms(error_const[order] * d / scale_new)
         if carry_s:
-            scale_s_new = _sens_scale(atol_s, rtol, s_new, y_new, p)
+            scale_s_new = _sens_scale(atol_s, rtol, s_new, p)
             error_norm = jnp.maximum(error_norm, _rms(error_const[order] * ds / scale_s_new))
         reject = converged & (error_norm > 1)
         accept = converged & ~reject
