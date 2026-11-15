@@ -13,6 +13,16 @@
       "workaround": "Use TenQSP 0.8.0, or a tighter rtol (the error shrinks with it)."
     },
     {
+      "id": "noise-floor-condition-on-time",
+      "title": "A noise floor in a model with a condition on time froze its group from the start",
+      "area": ["extinction", "model"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.8.2",
+      "changes_results": true,
+      "details": "In a model with any condition on time (... if t < 10 else ...), every extinction group with noise_floor was seen as zero from the start: its members neither changed nor fed the rest of the model, on either backend, with no error. Models without a condition on time, and groups without noise_floor, were not affected.",
+      "workaround": "Leave noise_floor out of such a model's extinction groups."
+    },
+    {
       "id": "jax-large-dose-tiny-atol",
       "title": "A large dose into a state near 0 with a very small atol can fail on the JAX solver",
       "area": ["doses", "solver", "derivatives"],

@@ -14,6 +14,11 @@ versioning; `0.x` releases may change the API.
   the floor at 1e-12 of each derivative's largest entry, also added in 0.8.1, is kept, and
   alone keeps derivatives just after a later dose from failing with a small `atol`. Results
   computed from derivatives change.
+- **A noise floor in a model with a condition on time:** in a model with any condition on time
+  (`... if t < 10 else ...`), every extinction group `with noise_floor` was seen as zero from
+  the start, so its members neither changed nor acted on the rest of the model, on either
+  backend and with no error (its slot in the parameters was the one that holds the time of
+  the conditions). Results of such models change.
 
 ## [0.8.1] — 2026-11-14
 

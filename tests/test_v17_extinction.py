@@ -439,3 +439,24 @@ def test_a_group_that_feeds_itself_is_not_warned_about(build):
     """Growth, births from the group's own phage, and a source inside the group are not
     feeds from outside; without a floor there is nothing to warn about."""
     assert floor_warnings(build()) == []
+
+
+@pytest.mark.parametrize("backend", ["scipy", "jax"])
+def test_a_noise_floor_in_a_model_with_a_condition_on_time(backend):
+    """The noise floor's theta slot comes after the time slot of conditions on time; it used
+    to be the same slot, so the group read as floored from the start and did not decay.
+    Oracle: until t = 10 the switch is 1, so B decays at rate 0.5 and crosses 1 at
+    ln(100)/0.5 = 9.21, as without the switch."""
+    timed = tq.Model.from_text(
+        "model floor_and_time\nparam r = 0.5\nparam d = 1.0\ncompartment B\n"
+        "d_t(B) = r*B - d*(1 if t < 10 else 0)*B\nB(0) = 100\n"
+        "extinction cells: B below 1 with noise_floor\n"
+    )
+    times = np.array([0.0, 2, 4, 20])
+    cm = timed.compile()
+    assert cm.plan.switch_slot not in cm.floor_slots
+    sol = timed.solve((0, 20), times=times, backend=backend, **TIGHT)
+    np.testing.assert_allclose(np.asarray(sol["B"])[:3], 100 * np.exp(-0.5 * times[:3]), rtol=1e-7)
+    assert np.asarray(sol["B"])[3] == 0.0
+    ((t_ext, name),) = sol.extinctions
+    assert name == "cells" and t_ext == pytest.approx(np.log(100) / 0.5, rel=1e-6)
