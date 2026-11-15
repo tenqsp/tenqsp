@@ -5,6 +5,8 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-11-15
+
 ### Fixed
 - **Derivatives much smaller than their state (0.8.1):** the derivatives carried by the JAX
   solver (`sim.function`, `sim.sensitivity`) were resolved only to `rtol` of the state's
