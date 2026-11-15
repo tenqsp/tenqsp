@@ -6,7 +6,8 @@ neighbours) has, in its first steps, an error estimate as large as itself. With
 ``atol + rtol |s|`` alone the step could only pass if ``atol`` were large; with a small
 ``atol`` every step was rejected down to round-off ("required step size is less than
 spacing between numbers"). Oracle: central differences of the scipy backend at tight
-tolerances."""
+tolerances. A derivative much smaller than its state is still resolved to ``rtol`` of its own
+size (closed form)."""
 
 from __future__ import annotations
 
@@ -74,3 +75,18 @@ def test_a_large_dose_moved_late_in_the_run_with_a_small_atol():
 
     h = 1e-3
     assert np.isclose(s, (o_end(900 + h) - o_end(900 - h)) / (2 * h), rtol=1e-4)
+
+
+def test_a_small_derivative_is_resolved_to_its_own_rtol():
+    """A slow state fed by a small, fast input: dy/dt = -0.01 y + c exp(-5 t), y(0) = 1, so
+    dy/dc = (exp(-0.01 t) - exp(-5 t)) / 4.99, and c dy/dc is a millionth of y. Scaled by the
+    state (``rtol |y|``, as in 0.8.1) it was resolved only to that: 15 % off at rtol 1e-6."""
+    m = tq.Model.from_text(
+        "model small_input\nparam c = 1e-6\ncompartment y\n"
+        "d_t(y) = -0.01*y + c*exp(-5*t)\ny(0) = 1\n"
+    )
+    t = np.array([0.1, 0.3, 0.5, 1, 2, 5])
+    sim = m.simulator(outputs=["y"], rtol=1e-6, atol=1e-12)
+    s = sim.sensitivity(tq.Scenario(times=t), wrt=["c"])
+    exact = (np.exp(-0.01 * t) - np.exp(-5 * t)) / 4.99
+    np.testing.assert_allclose(np.asarray(s["y"]["c"]).ravel(), exact, rtol=1e-3)

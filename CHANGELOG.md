@@ -5,6 +5,16 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Fixed
+- **Derivatives much smaller than their state (0.8.1):** the derivatives carried by the JAX
+  solver (`sim.function`, `sim.sensitivity`) were resolved only to `rtol` of the state's
+  value, not of their own, since 0.8.1 made their error scale `atol + rtol (|derivative| +
+  |state|)`; a derivative a millionth of its state could be 15 % off at `rtol=1e-6`, which
+  could make standard errors fail in a fit. The scale is again `atol + rtol |derivative|`;
+  the floor at 1e-12 of each derivative's largest entry, also added in 0.8.1, is kept, and
+  alone keeps derivatives just after a later dose from failing with a small `atol`. Results
+  computed from derivatives change.
+
 ## [0.8.1] — 2026-11-14
 
 ### Added

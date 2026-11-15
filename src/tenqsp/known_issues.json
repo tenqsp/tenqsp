@@ -3,6 +3,16 @@
   "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
   "issues": [
     {
+      "id": "small-derivatives-state-accuracy",
+      "title": "Derivatives much smaller than their state were inaccurate on the JAX solver",
+      "area": ["derivatives"],
+      "introduced": "0.8.1",
+      "fixed_in": "0.8.2",
+      "changes_results": true,
+      "details": "Forward derivatives (sim.function with up to 40 names, sim.sensitivity) were resolved only to rtol of the state's value, not of their own: a derivative a million times smaller than its state could be 15 % off at rtol 1e-6, with no error. Gradients and standard errors computed from them changed; in tenqsp-fit, standard errors could fail ('the Hessian of -2LL is not positive definite'). Values of the solution were not affected.",
+      "workaround": "Use TenQSP 0.8.0, or a tighter rtol (the error shrinks with it)."
+    },
+    {
       "id": "jax-large-dose-tiny-atol",
       "title": "A large dose into a state near 0 with a very small atol can fail on the JAX solver",
       "area": ["doses", "solver", "derivatives"],
