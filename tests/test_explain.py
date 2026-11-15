@@ -499,3 +499,13 @@ B[s=S](0) = 1
     tex = m.to_latex()
     _check_latex(tex)
     assert r"B_{\text{50\%}}(0)" in tex
+
+
+def test_explain_a_rate_with_a_condition_on_time():
+    """A rate that switches with time, (1 if t < 20 else 0): explain() rebuilt the condition's
+    'otherwise' branch from a placeholder and failed with a TypeError."""
+    m = tq.Model.from_text(
+        "model switched\nparam r = 0.2, kill = 1.0\ncompartment B\n"
+        "d_t(B) = r*B - kill*(1 if t < 20 else 0)*B\nB(0) = 100\n"
+    )
+    assert "d_t(B) = r*B - kill*(1 if t < 20 else 0)*B" in m.explain()

@@ -256,6 +256,20 @@ defect below was reproduced before it was fixed and has a regression test.
     interpolation weight is still second order on grids that refine smoothly, so only the
     by-hand flux test sees it.
 
+## Later decisions
+
+31. **An extinct group that nothing feeds stays extinct** (project lead, 2026-11-15, for TenQSP
+    0.8.3). After an extinction the solver's linear algebra (an LU with pivoting mixes the
+    group's row with the rows of large states) put round-off, about 1e-26, back into a
+    group whose own equations keep it at exactly 0; once its net growth turned positive (the
+    predator decayed) it grew back into a population. Such a group, one with no feed from
+    outside it (as validation finds them for decision 23), is now floored after an
+    extinction, through the same theta slot, until it is armed again. Groups fed from
+    outside keep their equations after an extinction: a floor would hide their own growth as
+    well as their losses, unlike before their first arming. A run that doses or infuses into
+    a group never holds it. Not chosen: an opt-in flag, which every user would have to know
+    to set.
+
 ## Consequences
 
 - Danckwerts, biofilm–bulk and Robin-with-advection models are expressible and second order

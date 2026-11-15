@@ -472,7 +472,9 @@ def _program(
     G = len(groups)
     members = jnp.asarray(np.array([g.members for g in groups], dtype=bool).reshape(G, n))
     thr = jnp.asarray(np.array([g.threshold for g in groups], dtype=np.float64))
-    floor_group = np.array([i for i, g in enumerate(groups) if g.noise_floor], dtype=np.int64)
+    floorable = [i for i, g in enumerate(groups) if any(g is f for f in cm._floors)]
+    floor_group = np.array(floorable, dtype=np.int64)
+    floor_nf = np.array([groups[i].noise_floor for i in floorable], dtype=bool)
     floor_slot = np.array(cm.floor_slots, dtype=np.int64)
     names = cm.layout.names
     state_name = np.zeros(n, dtype=np.int64)
@@ -572,14 +574,27 @@ def _program(
         )
 
         W = measure[None, :] * members  # (G, n): a group's total is W[g] @ y
+        # a group that stays extinct is held only if this run doses into none of its states
+        hit_b = jnp.isfinite(b_time) & (b_time <= t1)
+        hit_i = jnp.isfinite(i_start) & (i_start < t1)
+        dosed_into = jnp.zeros(n_all, dtype=bool).at[b_index].max(hit_b).at[i_index].max(hit_i)
+        holds = jnp.asarray([g.stays_extinct for g in groups], dtype=bool) & ~jnp.any(
+            members & dosed_into[None, :n], axis=1
+        )
 
         def totals(z):
             return W @ z[:n]
 
-        def with_floors(th, armed):  # a floored group counts (no floor) exactly while armed
+        def floored(armed, died):
+            """Which floorable groups are floored: disarmed, and with a noise floor, or
+            staying extinct once they have died (ADR 0005)."""
+            fg = floor_group
+            return ~armed[fg] & (jnp.asarray(floor_nf) | (holds[fg] & died[fg]))
+
+        def with_floors(th, armed, died):
             if floor_group.size == 0:
                 return th
-            return th.at[floor_slot].set(jnp.where(armed[floor_group], 0.0, 1.0))
+            return th.at[floor_slot].set(jnp.where(floored(armed, died), 1.0, 0.0))
 
         def extinct(i, te, z, armed, rec, when, zm):
             """Group i to zero (if ``when``), its amount booked as removed; ``zm`` marks the
@@ -601,20 +616,20 @@ def _program(
             hit = b_time == at
             return z.at[b_index].add(jnp.where(hit, rise, 0.0))
 
-        def segment_inputs(a, armed):
+        def segment_inputs(a, armed, died):
             """theta and the infusion input of the segment starting at ``a``."""
             b, _ = next_boundary(a)
             mid = 0.5 * (a + jnp.minimum(b, t1))
             th = theta if slot is None else theta.at[slot].set(mid)
-            th = with_floors(th, armed)
+            th = with_floors(th, armed, died)
             on = (i_start <= mid) & (mid < i_stop)
             return th, jnp.zeros(n_all).at[i_index].add(jnp.where(on, i_rise, 0.0)), on
 
-        def across(at, at_dot, z_before, z_after, s_before, f_before, armed_after):
+        def across(at, at_dot, z_before, z_after, s_before, f_before, armed_after, died_after):
             """The derivative just after the boundary at ``at`` (moving at ``at_dot``): its
             doses' amounts, and the jump of the right-hand side (before minus after)."""
             hit = b_time == at
-            th_a, u_a, _ = segment_inputs(at, armed_after)
+            th_a, u_a, _ = segment_inputs(at, armed_after, died_after)
             f_after = rhs(at, z_after, th_a, geom) + u_a
 
             def one(at_dot, s_before, rise_dot):
@@ -647,7 +662,7 @@ def _program(
             v = (cm._measure_impl(th, geom)[None, :] * members) @ z[:n] - thr
             return jnp.concatenate([v, switch_values(t, z, th)]) if E else v
 
-        def event_jump(r, k, th, u, S, z_ev, zm, armed_ev, dosed, b, d_watch):
+        def event_jump(r, k, th, u, S, z_ev, zm, armed_ev, died_ev, dosed, b, d_watch):
             """Forward sensitivities just after the event that ended this segment (``forward``
             in the docstring): the event time moves with each direction; the solution's slope
             before and after it is the right-hand side on each side (a switch: read just off
@@ -664,7 +679,7 @@ def _program(
             nudge = 1e-8 * jnp.max(jnp.abs(y_e)) / jnp.where(norm == 0, 1.0, norm)
             off = jnp.where(is_switch, nudge, 0.0) * grad_g
             f_before = rhs(t_e, y_e + before * off, th, geom) + u
-            th_n, u_n, _ = segment_inputs(t_e, armed_ev)
+            th_n, u_n, _ = segment_inputs(t_e, armed_ev, died_ev)
             f_after = rhs(t_e, z_ev - before * off, th_n, geom) + u_n
             g_t = jax.jvp(lambda tt: ev_raw(tt, y_e, th)[k], (t_e,), (jnp.ones_like(t_e),))[1]
             rate = g_t + jnp.vdot(grad_g, f_before)
@@ -686,8 +701,8 @@ def _program(
             b = jnp.minimum(b, t1)
             mid = 0.5 * (a + b)
             th_base = theta if slot is None else theta.at[slot].set(mid)
-            th = with_floors(th_base, s["armed"])
-            armed = s["armed"]
+            th = with_floors(th_base, s["armed"], s["died"])
+            armed, died = s["armed"], s["died"]
             on = (i_start <= mid) & (mid < i_stop)
             u = jnp.zeros(n_all).at[i_index].add(jnp.where(on, i_rise, 0.0))
             d = jnp.where(s["fresh"], aim(a, s["z"], th), s["d"]) if E else s["d"]
@@ -782,7 +797,7 @@ def _program(
                 )
             if E:
                 ks = jnp.maximum(r.event - G, 0)
-                d_ev = aim(r.t, z_ev, with_floors(th_base, armed_ev))
+                d_ev = aim(r.t, z_ev, with_floors(th_base, armed_ev, died | zm))
                 flip = at_event & (r.event >= G) & (d[ks] != 0)
                 d_ev = d_ev.at[ks].set(jnp.where(flip, -d[ks], d_ev[ks]))
                 d = jnp.where(at_event, d_ev, d)
@@ -801,13 +816,16 @@ def _program(
                     axis=-1,
                 )
                 b_dot = jnp.where(b < t1, cands_dot[..., b_which], 0.0)
-                zs_ok = across(b, b_dot, r.y, z_ok, r_s, fun(b, r.y), armed_ok)
+                zs_ok = across(b, b_dot, r.y, z_ok, r_s, fun(b, r.y), armed_ok, died)
                 if P and (G or E):
-                    zs_ev = event_jump(r, k, th, u, r_s, z_ev, zm, armed_ev, dosed, b, d_watch)
+                    zs_ev = event_jump(
+                        r, k, th, u, r_s, z_ev, zm, armed_ev, died | zm, dosed, b, d_watch
+                    )
                 else:
                     zs_ev = jnp.where(z_ev == r.y, r_s, 0.0)  # zeroed there: no derivative
                 zs_end = jnp.where(ok, zs_ok, jnp.where(at_event, zs_ev, r_s))
             armed = jnp.where(ok, armed_ok, jnp.where(at_event, armed_ev, armed))
+            died = jnp.where(at_event, died | zm, died)
             switched = at_event & (r.event >= G)
             extra = {}
             if record:  # this segment, for the replay
@@ -820,6 +838,7 @@ def _program(
                         "a": put("a", a),
                         "mid": put("mid", mid),
                         "armed": put("armed", s["armed"]),
+                        "floored": put("floored", floored(s["armed"], s["died"])),
                         "h0": put("h0", r.h0),
                         "first": put("first", s["n_steps"]),
                         "nsteps": put("nsteps", r.n_steps),
@@ -840,6 +859,7 @@ def _program(
                 "z": z_end,
                 "d": d,
                 "armed": armed,
+                "died": died,
                 "rec": rec,
                 "fresh": ok,  # a new boundary segment starts: aim again there
                 "ys": r.ys,
@@ -867,6 +887,7 @@ def _program(
             "z": z_start,
             "d": jnp.zeros(E),
             "armed": totals(z_start) >= thr,  # a group at its threshold at the start is armed
+            "died": jnp.zeros(G, dtype=bool),  # gone extinct in this run (ADR 0005)
             "rec": {
                 "t": jnp.full(EXTINCTION_RECORDS, jnp.nan),
                 "g": jnp.full(EXTINCTION_RECORDS, -1, dtype=jnp.int64),
@@ -892,7 +913,7 @@ def _program(
             "most_steps": zero,  # the most steps in one segment (max_steps is per segment)
         }
         if carry:  # the start: the initial values, then any doses at t0
-            th_0, u_0, _ = segment_inputs(t0, state["armed"])
+            th_0, u_0, _ = segment_inputs(t0, state["armed"], state["died"])
             f_0 = rhs(t0, z, th_0, geom) + u_0
             # a dose at t0 that moves: the start runs undosed until it (f before)
             at_t0 = b_time == t0
@@ -904,6 +925,7 @@ def _program(
                 jnp.concatenate([y0_dot, jnp.zeros(y0_dot.shape[:-1] + (n_all - n,))], axis=-1),
                 f_0,
                 state["armed"],
+                state["died"],
             )
         if record:
             state["steps"] = empty_record(record, n_all)
@@ -912,6 +934,7 @@ def _program(
                 "a": jnp.full(record, jnp.nan),
                 "mid": jnp.full(record, jnp.nan),
                 "armed": jnp.zeros((record, G), dtype=bool),
+                "floored": jnp.zeros((record, floor_group.size), dtype=bool),
                 "h0": jnp.ones(record),
                 "first": jnp.full(record, NO_STEP, dtype=jnp.int64),
                 "nsteps": jnp.zeros(record, dtype=jnp.int64),

@@ -1714,6 +1714,23 @@ class _Checker:
                 self.add("warning", f"field '{f.name}'", "has no terms, so it never changes.")
 
 
+def fed_from_outside(ir: ModelIR) -> dict[str, bool]:
+    """Per extinction group, whether anything outside it can add to it (a reaction or rate
+    that does not vanish with the group, a switch or mutation into it, an inflow boundary, a
+    transfer): those keep their own dynamics after an extinction (ADR 0005). A group whose
+    slices cannot be told apart counts as fed."""
+    c = _Checker(ir)
+    c.register_names()
+    out = {}
+    for e in ir.extinctions:
+        if e.where and len(e.where) != len(e.group):
+            out[e.name] = True
+            continue
+        part = {m: dict(e.member_where(i)) for i, m in enumerate(e.group)}
+        out[e.name] = bool(c._feeds_into(part))
+    return out
+
+
 def validate(ir: ModelIR, *, raise_on_error: bool = True) -> Report:
     """Check a model; return a ``Report`` (raise ``ModelError`` on errors by default)."""
     c = _Checker(ir)

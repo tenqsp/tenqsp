@@ -5,6 +5,19 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Fixed
+- **An extinct population came back from round-off:** after an extinction group was set to
+  0, the solver's linear algebra could put round-off (about 1e-26) back into it although
+  nothing fed it, and once its net growth turned positive (the predator or the drug gone) it
+  grew back into a population, with no error. Once extinct, a group that nothing outside it
+  feeds now stays extinct: every equation sees it as 0 until it is back at its threshold.
+  A group that something outside adds to (a mutation or switch into it, an inflow, a
+  transfer) follows its equations after an extinction, as before, and so does a group a run
+  doses into. `explain()` says which groups stay extinct. Results change where such a
+  population used to come back.
+- `explain()` failed with a `TypeError` on a model whose rates contain a condition on time,
+  such as `kill*(1 if t < 20 else 0)*B`.
+
 ## [0.8.2] — 2026-11-15
 
 ### Fixed

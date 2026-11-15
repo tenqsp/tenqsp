@@ -362,6 +362,14 @@ In Python: `m.extinction(B, threshold=1)`, `m.extinction(B.at(s="R"), threshold=
   below it is set to zero at the exact crossing, and the solve restarts there.
 - A group that has **never reached** the threshold is never touched. Mutants seeded from zero
   can spend hours below one cell and still grow.
+- **Once extinct, a group that nothing outside feeds stays extinct.** Its own equations then
+  keep it at exactly 0, but the solver's linear algebra can put round-off (1e-26, say) back
+  into it, and a population that grows again (the phage gone) would grow from that. So until
+  the group is back at its threshold, every equation sees it as 0, as with a
+  [noise floor](#ghost-populations-and-the-noise-floor). A group that something outside adds
+  to (a mutation or switch into it, an inflow, a transfer) follows its equations after an
+  extinction, and so does a group a run doses into. `m.explain()` says which groups stay
+  extinct.
 - One group per strain: each strain dies on its own.
 - What was removed is booked in the ledger under `extinction`, and `sol.extinctions` lists
   `(time, group)` for each.
