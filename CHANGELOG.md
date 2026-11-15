@@ -5,6 +5,9 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-11-15
+A bug-fix release. The first fix can change results: see `tq.known_issues()` on older versions.
+
 ### Fixed
 - **An extinct population came back from round-off:** after an extinction group was set to
   0, the solver's linear algebra could put round-off (about 1e-26) back into it although
