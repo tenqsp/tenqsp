@@ -443,10 +443,9 @@ def source(fn, *examples, static=(), name="f", prefix="C"):
         src = None
     if src is not None:
         return src, {}
-    try:  # loops over flat buffers (array code took minutes to compile)
-        return _loop_source(closed, [tuple(np.shape(examples[i])) for i in dyn], name, prefix)
-    except NotTranslatable:
-        pass
+    # loops over flat buffers (array code took minutes to compile: a kernel loop mode cannot
+    # write raises, and the model stays on the JAX backend)
+    return _loop_source(closed, [tuple(np.shape(examples[i])) for i in dyn], name, prefix)
     w = _Writer()
     w.cnames = (f"{prefix}{i}" for i in itertools.count())
     argnames = [f"a{i}" for i in range(len(dyn))]
@@ -928,10 +927,17 @@ def _loop_eqn(e, name, args, w: _L, prefix):
     dt = _dtype(out) if out is not None else "np.float64"
     if name in _ELEMENTWISE:
         ops = []
-        for a in args:
-            if a["kind"] != "num" and tuple(a["shape"]) != shape:
-                raise NotTranslatable("an elementwise operation on arrays of two shapes")
-            ops.append(a)
+        for a, v in zip(args, e.invars, strict=True):
+            vs = tuple(v.aval.shape)
+            if a["kind"] == "num" or vs == shape:
+                ops.append(a)
+            elif _size(vs) == 1:  # one entry, read as a number
+                ops.append(_scalar_of(a, w, prefix))
+            elif len(vs) == len(shape):  # size-1 dimensions broadcast (JAX allows it)
+                m = np.broadcast_to(np.arange(_size(vs)).reshape(vs), shape)
+                ops.append(_materialize(_map(dict(a, shape=vs), m, shape, w, prefix), w, prefix))
+            else:
+                raise NotTranslatable(f"an elementwise operation on shapes {vs} and {shape}")
         if n == 1 and not shape:  # numbers: one line
             c = [_at(a) if a["kind"] != "expr" else a["code"] for a in ops]
             c = [cc.replace("[k]", "[0]") for cc in c]
