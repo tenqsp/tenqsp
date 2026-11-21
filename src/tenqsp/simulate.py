@@ -284,7 +284,7 @@ class Simulator:
         return SimResult(sol, self.outputs, sc)
 
     def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None, batch=None,
-                 check=True):  # fmt: skip
+                 check=True, backend="jax"):  # fmt: skip
         """The simulation as a JAX function of the numbers named in ``wrt``, for estimation
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
@@ -321,12 +321,15 @@ class Simulator:
         that call's compile serves later calls of ``fs``; a caller that compiles its own
         function around ``fs`` would compile twice). Calls take ``rtol``, ``atol`` and
         ``max_steps`` for that call, without a new compile, and ``with_steps=True`` for the
-        steps of the same run."""
+        steps of the same run. ``backend="native"`` (a list of scenarios, forward or no
+        derivatives, a model without events): the solve compiled by numba, the
+        same steps as the JAX solver up to round-off and several times faster on the CPU;
+        the first build of a model compiles it (cached on disk)."""
         from tenqsp.gradients import function
 
         return function(
             self, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
-            batch=batch, check=check,
+            batch=batch, check=check, backend=backend,
         )  # fmt: skip
 
     def sensitivity(self, scenario: Scenario | None = None, *, wrt, relative: bool = False):

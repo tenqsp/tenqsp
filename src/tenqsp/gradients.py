@@ -200,7 +200,7 @@ class FunctionBatch:
 
     def __init__(
         self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto", record_room=None,
-        batch="vmap", check=True,
+        batch="vmap", check=True, backend="jax",
     ):  # fmt: skip
         from tenqsp.simulate import Scenario
 
@@ -272,6 +272,21 @@ class FunctionBatch:
             need,
             self.record_room,
         )
+        if backend not in ("jax", "native"):
+            raise ValueError(f"backend= is 'jax' (the default) or 'native', not {backend!r}.")
+        if backend == "native":  # the solve compiled by numba (ADR 0011)
+            from tenqsp.backends.native import program as native
+
+            why = native.unsupported(cm, self.derivatives)
+            if why is not None:
+                raise ValueError(f"backend='native' is not possible here: {why}.")
+            if batch != "vmap":
+                raise ValueError("backend='native' runs each scenario with its own steps: "
+                                 "batch='vmap'.")  # fmt: skip
+            impl = native.native_sens_program(
+                cm, runs[0][0].model_doses, self.outputs, len(names) if self.derivatives else 0
+            )
+        self.backend = backend
         key = ("batch", impl)
         if key not in cm._lazy:
             cm._lazy[key] = jax.jit(jax.vmap(impl))
@@ -1203,14 +1218,24 @@ def _formula_program(cm, model_doses: bool, outputs, derivatives: bool):
 
 
 def function(
-    sim, scenario=None, *, wrt, derivatives="auto", record_room=None, batch=None, check=True
+    sim,
+    scenario=None,
+    *,
+    wrt,
+    derivatives="auto",
+    record_room=None,
+    batch=None,
+    check=True,
+    backend="jax",
 ) -> Function | FunctionBatch:
     """See ``function``."""
     if isinstance(scenario, list | tuple):
         return FunctionBatch(
             sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
-            batch="vmap" if batch is None else batch, check=check,
+            batch="vmap" if batch is None else batch, check=check, backend=backend,
         )  # fmt: skip
+    if backend != "jax":
+        raise ValueError("backend='native' is for a list of scenarios (sim.function([...])).")
     if batch is not None:
         raise ValueError("batch= is for a list of scenarios (sim.function([sc1, sc2, ...])).")
     if check is not True:

@@ -16,6 +16,16 @@ versioning; `0.x` releases may change the API.
   `"forward"` or `False`, no events or conditions on time, the dense tier and one start time;
   a stacked run that fails gives NaN for every scenario of the call (`fs.status(X)` says
   which failed).
+- **A native CPU backend** (ADR 0011): `sim.function([sc1, sc2, ...], wrt=...,
+  backend="native")` solves with TenQSP's BDF compiled by numba (`pip install
+  "tenqsp[native]"`): the model's right-hand side, Jacobian and derivatives are translated
+  from its JAX programs, the solver is a port of the JAX one (the same steps up to round-off),
+  and the scenarios of a batch run in parallel on the cores. Several times to 15 times faster
+  per run on the CPU (an oral PK batch: 45 ms against 4 ms; a 118-state model with 6
+  scenarios and 5 derivatives: 4.8 s against 0.32 s). The first build of a model compiles it
+  (cached on disk, in `~/.cache/tenqsp/native` or `TENQSP_NATIVE_CACHE`). For forward or no
+  derivatives and models without events or conditions on time; refused, with the reason,
+  elsewhere.
 - **Call-time step limit and step counts**: `fs(X, max_steps=...)` (and `f(x, ...)`,
   `status`, `steps`) limits that call's steps, like `rtol` and `atol`, without a new compile;
   `with_steps=True` returns the steps of the same run with the outputs, also inside

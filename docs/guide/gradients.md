@@ -301,6 +301,21 @@ tolerances or step limit without a new compile (they are inputs of the compiled 
 must run at its own values); `check=False` leaves that to the first call, for code that
 compiles its own function around `fs`.
 
+**The native backend.** `sim.function([...], wrt=..., backend="native")` runs the same
+computation with TenQSP's BDF compiled by numba instead of XLA (install with
+`pip install "tenqsp[native]"`). On the CPU it is several times faster per run, and up to
+15 times on models with a hundred states: XLA runs each solver step as hundreds of small
+operations, each with a fixed cost. The two backends take the same steps up to round-off, so
+results agree closely; `fs.backend` says which one ran. The first build of a model compiles
+its native solver (seconds to a minute, cached on disk: later builds load it). It covers
+forward and no derivatives, and models without events or conditions on time; elsewhere it is
+refused, with the reason, and the JAX backend runs.
+
+```python
+fn = sim.function(subjects, wrt=["CL", "V"], backend="native")
+assert np.allclose(fn(fn.x0)["conc"][fn.mask], fv(fv.x0)["conc"][fv.mask], rtol=1e-6)
+```
+
 ## How the derivatives are computed
 
 `f` gets its derivatives in one of two ways, chosen by `derivatives=`:
