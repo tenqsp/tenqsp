@@ -283,7 +283,7 @@ class Simulator:
         )
         return SimResult(sol, self.outputs, sc)
 
-    def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None):
+    def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None, batch="auto"):
         """The simulation as a JAX function of the numbers named in ``wrt``, for estimation
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
@@ -310,10 +310,18 @@ class Simulator:
         ``{output: (scenarios, times, ...)}``, NaN past each scenario's own times
         (``fs.t``, ``fs.mask``, ``fs.n_times``), ``fs.status(X)`` one status per scenario.
         Each scenario keeps its regimen, times, start and starting state; all run in one
-        ``jax.vmap`` call of one build, padded exactly (slots at t = +inf)."""
+        call of one build, padded exactly (slots at t = +inf). ``batch=``: ``"stacked"`` (the
+        scenarios as one system, with one sequence of steps chosen for the least easy of
+        them: much faster for small models; a scenario's results then depend slightly on
+        the others in the batch, within the tolerances), ``"vmap"`` (each scenario its own
+        steps, in one ``jax.vmap`` call) or ``"auto"`` (the default: stacked where it applies,
+        see ``gradients``); ``fs.batch`` says which."""
         from tenqsp.gradients import function
 
-        return function(self, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room)
+        return function(
+            self, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
+            batch=batch,
+        )  # fmt: skip
 
     def sensitivity(self, scenario: Scenario | None = None, *, wrt, relative: bool = False):
         """d output / d each name in ``wrt`` at every output time, at the scenario's values:

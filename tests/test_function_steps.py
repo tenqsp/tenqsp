@@ -82,11 +82,14 @@ def test_a_failing_run_still_reports_its_steps():
 
 def test_one_count_per_scenario_in_a_batch():
     scs = [scenario(ONE, ka=0.5), scenario(TWO, ka=1.2), scenario(ONE, ka=50.0)]
-    fs = simulator().function(scs, wrt=["ka", "CL"])
+    fs = simulator().function(scs, wrt=["ka", "CL"], batch="vmap")
     counts = fs.steps(fs.x0)
     assert isinstance(counts, tuple) and len(counts) == 3
     singles = [simulator().function(sc, wrt=["ka", "CL"]) for sc in scs]
     assert counts == tuple(f.steps(f.x0) for f in singles)
+    # stacked: one run, so one count for all
+    st = simulator().function(scs, wrt=["ka", "CL"], batch="stacked").steps(fs.x0)
+    assert len(st) == 3 and len(set(st)) == 1 and st[0] > 0
 
 
 def test_a_new_max_steps_compiles_nothing_new():

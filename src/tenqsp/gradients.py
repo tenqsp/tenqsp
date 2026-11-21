@@ -59,6 +59,11 @@ RECORD_ROOM = 2  # the record holds 2x the steps of the run at the scenario's va
 # default (``record_room=``; design decision 2026-11-12, replacing 4x / 2x above 2,000 states:
 # memory grows with states x room, and a gradient at x0 uses only 1x)
 REUSE_WITHIN = 1.5  # a build whose record is at most this much larger is shared
+BATCH = ("auto", "stacked", "vmap")  # FunctionBatch's batch= (ADR 0010)
+# batch="auto" stacks the scenarios unless their doses fall at so many different times that
+# the shared run restarts far more often than any one scenario would: more distinct dose and
+# infusion times among all of them than this many times the most of any one, plus this many
+STACK_TIMES_FACTOR = 4
 
 
 def record_slots(k: int) -> int:
@@ -189,10 +194,15 @@ class FunctionBatch:
     ``sim.function``; a dose number must exist in every scenario.
     ``fs(X, rtol=..., atol=...)``: other tolerances for this call, as for ``sim.function``."""
 
-    def __init__(self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto", record_room=None):
+    def __init__(
+        self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto", record_room=None,
+        batch="auto",
+    ):  # fmt: skip
         from tenqsp.simulate import Scenario
 
         derivatives = _derivatives_option(derivatives)
+        if batch not in BATCH:
+            raise ValueError(f"batch= is 'auto' (the default), 'stacked' or 'vmap', not {batch!r}.")
         scenarios = tuple(scenarios)
         if not scenarios:
             raise ValueError("Give at least one scenario.")
@@ -266,6 +276,24 @@ class FunctionBatch:
         for i, (run, _) in enumerate(runs):
             self.t[i, : run.t_out.size] = run.t_out
         self._T, self._mask = T, jnp.asarray(self.mask)
+        # stacked or one jax.vmap call (ADR 0010)
+        why = _why_not_stacked(cm, self.derivatives, runs, len(scenarios))
+        if batch == "stacked" and why is not None:
+            raise ValueError(f"batch='stacked' is not possible here: {why}. Use batch='vmap' "
+                             "(or 'auto', which chooses).")  # fmt: skip
+        self.batch = "stacked" if batch != "vmap" and why is None else "vmap"
+        self._vmap_impl = self._impl
+        if self.batch == "stacked":
+            t_all = np.stack([np.asarray(run.args["t_out"], dtype=np.float64) for run, _ in runs])
+            union = np.unique(t_all[np.isfinite(t_all)])
+            rows = np.where(np.isfinite(t_all), np.searchsorted(union, t_all), 0)
+            stacked = _stacked_impl(
+                cm, runs[0][0].model_doses, self.derivatives, self.outputs, len(names),
+                len(scenarios), union.size, rows.shape[1],
+            )  # fmt: skip
+            # the layout of the times is an input: new times of the same shape compile nothing
+            layout = (jnp.asarray(union, dtype=jnp.float64), jnp.asarray(rows, dtype=jnp.int64))
+            self._impl = lambda X, data: stacked(X, data, *layout)
 
     def __len__(self) -> int:
         return len(self.scenarios)
@@ -280,8 +308,12 @@ class FunctionBatch:
         return result
 
     def status(self, X, *, rtol=None, atol=None) -> tuple[str, ...]:
-        """``"ok"``, or why the run failed (its outputs are NaN), for each scenario."""
+        """``"ok"``, or why the run failed (its outputs are NaN), for each scenario. (A stacked
+        run that fails gives NaN for every scenario; this then runs them one by one, to say
+        which failed and why.)"""
         _, codes, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+        if self.batch == "stacked" and np.any(np.asarray(codes) != OK):
+            _, codes, _ = self._vmap_impl(self._x(X), _tolerances(self._data, rtol, atol))
         full = _record_full_text(self.capacity, self._need, self.record_room or RECORD_ROOM)
         return tuple(
             full
@@ -309,7 +341,7 @@ class FunctionBatch:
     def __repr__(self) -> str:
         return (
             f"<tq FunctionBatch of {list(self.names)} -> {list(self.outputs)}: "
-            f"{len(self)} scenarios, up to {self._T} times>"
+            f"{len(self)} scenarios, up to {self._T} times, {self.batch}>"
         )
 
 
@@ -449,6 +481,129 @@ def _program_for(cm, model_doses, derivatives, outputs, p: int, need: int, room=
     )
     capacity = built[0] if built else capacity
     return _function_program(cm, model_doses, capacity, outputs), capacity
+
+
+def _why_not_stacked(cm, derivatives, runs, units: int) -> str | None:
+    """Why these scenarios cannot run as one stacked system (ADR 0010; None: they can)."""
+    if units < 2:
+        return "one scenario (stacking needs two or more)"
+    why = jb.stacked_unsupported(cm)
+    if why is not None:
+        return why
+    if derivatives == "reverse":
+        return "reverse derivatives (the replay of a stacked run is not available)"
+    if len({float(run.args["t0"]) for run, _ in runs}) > 1:
+        return "the scenarios start at different times"
+    times = [
+        {float(t) for k in ("b_time", "i_start") for t in np.asarray(run.args[k])
+         if np.isfinite(t)}
+        for run, _ in runs
+    ]  # fmt: skip
+    most = max(len(t) for t in times)
+    distinct = len(set().union(*times))
+    if distinct > STACK_TIMES_FACTOR * most + STACK_TIMES_FACTOR:
+        return (
+            f"the scenarios dose at {distinct} different times (at most {most} each): the "
+            "shared run would restart at every one"
+        )
+    return None
+
+
+def _stacked_impl(cm, model_doses, derivatives, outputs, p, units, n_union, n_times):
+    """``impl(X, data, union, rows) -> ({output: (units, T, ...)}, status (units,), most steps
+    (units,))`` for a stacked batch (``jax_backend._stacked_program``): the run writes every
+    unit's state at the union of their output times (``union``, ``n_union`` of them), and each
+    unit's rows are picked out (``rows``, (units, n_times)). Derivatives as
+    ``_sens_program``'s (forward sensitivities, read by a custom JVP) or none
+    (``derivatives=False``). One status for all: a stacked run that fails fails every unit
+    (``FunctionBatch.status`` then reruns them one by one)."""
+    P = p if derivatives == "forward" else 0
+    key = ("jax_stacked_function", model_doses, tuple(outputs), P, units, n_union, n_times)
+    if key in cm._lazy:
+        return cm._lazy[key]
+    run_program = jb._stacked_program(cm, model_doses=model_doses, forward=P, units=units)
+    outputs_of = _outputs_of(cm, outputs)
+    n, U = cm.n_states, units
+    who = jnp.arange(U)[:, None]
+
+    def call(args, dot, t_union, rows_j):
+        out = run_program(
+            theta=args["theta"], t0=args["t0"][0], t1=args["t1"], t_out=t_union,
+            b_time=args["b_time"], b_index=args["b_index"], b_amount=args["b_amount"],
+            i_start=args["i_start"], i_stop=args["i_stop"], i_index=args["i_index"],
+            i_rate=args["i_rate"], rtol=args["rtol"][0], atol=args["atol"],
+            max_step=jnp.min(args["max_step"]), max_steps=jnp.max(args["max_steps"]),
+            y_start=args["y_start"], dot=dot,
+        )  # fmt: skip
+        ys = out["ys"]
+        Y = ys[:, : U * n].reshape(-1, U, n)[rows_j, who, :]  # (U, T, n)
+        S = ys[:, U * n :].reshape(-1, P, U, n)[rows_j, :, who, :] if P else None  # (U,T,P,n)
+        return Y, S, out["status"], out["most_steps"]
+
+    def args_of(X, data):
+        return jax.vmap(lambda x, d: _inputs(x, d, model_doses)[0])(X, data)
+
+    def finish(X, data, Y, status, most):
+        real = jnp.isfinite(data["t_out"])  # (U, T)
+        Y = jnp.where(real[..., None], Y, Y[:, :1])
+        args = args_of(X, data)  # theta with X's derivatives, for the outputs
+        bad = jnp.where(status == OK, 0.0, jnp.nan)
+        Y = Y * jnp.where(status == OK, 1.0, jnp.nan) + bad * jnp.sum(X)
+        outs = jax.vmap(outputs_of)(args["theta"], Y, data["t_out"])
+        return outs, jnp.broadcast_to(status, (U,)), jnp.broadcast_to(most, (U,))
+
+    if not P:
+
+        def impl(X, data, t_union, rows_j):
+            args = args_of(_no_derivatives(X), data)
+            Y, _, status, most = call(args, None, t_union, rows_j)
+            return finish(jax.lax.stop_gradient(X), data, Y, status, most)
+
+        jitted = jax.jit(impl)
+        cm._lazy[key] = jitted
+        return jitted
+
+    def solve(X, data, t_union, rows_j):
+        def moved(x, d):
+            args, _ = _inputs(x, d, model_doses)
+            return {k: args[k] for k in _REGIMEN if args[k] is not None}
+
+        args = args_of(X, data)
+        # each direction is one entry of x moved in proportion to its value (one scale)
+        size = jnp.where(X != 0, jnp.abs(X), 1.0)  # (U, p)
+        dot = jax.vmap(
+            lambda x, d, sz: jax.vmap(lambda e: jax.jvp(lambda xx: moved(xx, d), (x,), (e,))[1])(
+                jnp.diag(sz)
+            )
+        )(X, data, size)  # fmt: skip
+        dot = {k: jnp.where(jnp.isfinite(v), v, 0.0) for k, v in dot.items()}
+        Y, S, status, most = call(args, dot, t_union, rows_j)
+        S = S / size[:, None, :, None]
+        real = jnp.isfinite(data["t_out"])
+        S = jnp.where(real[..., None, None], S, 0.0)
+        return Y, S, status, most
+
+    @jax.custom_jvp
+    def states(X, data, t_union, rows_j):
+        Y, _, status, most = solve(X, data, t_union, rows_j)
+        return Y, status, most
+
+    @states.defjvp
+    def states_jvp(primals, tangents):
+        X, data, t_union, rows_j = primals
+        Y, S, status, most = solve(X, data, t_union, rows_j)
+        S = jax_order.forward_only(S, _FORWARD_SECOND)
+        dY = jnp.einsum("utpn,up->utn", S, tangents[0])
+        none = lambda a: np.zeros(a.shape, dtype=jax.dtypes.float0)  # noqa: E731 - counts
+        return (Y, status, most), (dY, none(status), none(most))
+
+    def impl(X, data, t_union, rows_j):
+        Y, status, most = states(X, data, t_union, rows_j)
+        return finish(X, data, Y, status, most)
+
+    jitted = jax.jit(impl)
+    cm._lazy[key] = jitted
+    return jitted
 
 
 class Sensitivity:
@@ -1001,13 +1156,16 @@ def _formula_program(cm, model_doses: bool, outputs, derivatives: bool):
 
 
 def function(
-    sim, scenario=None, *, wrt, derivatives="auto", record_room=None
+    sim, scenario=None, *, wrt, derivatives="auto", record_room=None, batch="auto"
 ) -> Function | FunctionBatch:
     """See ``function``."""
     if isinstance(scenario, list | tuple):
         return FunctionBatch(
-            sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room
-        )
+            sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
+            batch=batch,
+        )  # fmt: skip
+    if batch != "auto":
+        raise ValueError("batch= is for a list of scenarios (sim.function([sc1, sc2, ...])).")
     return Function(sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room)
 
 

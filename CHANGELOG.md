@@ -5,6 +5,21 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- **Stacked batches** (ADR 0010): `sim.function([sc1, sc2, ...], wrt=...)` runs the scenarios
+  as one system, with one sequence of steps chosen for the least easy of them and the
+  iteration matrix as one block per scenario: for small models several times faster than one
+  `jax.vmap` call (Friberg's myelosuppression model, 20 scenarios with 4 sensitivities: 13 ms
+  against 91 ms). `batch=` chooses: `"auto"` (the default: stacked where it applies),
+  `"stacked"` or `"vmap"`; `fs.batch` says which. Stacked runs need derivatives `"forward"`
+  or `False`, no events or conditions on time, the dense tier and one start time.
+
+### Changed
+- **A batch's results can change slightly** (within the solver's tolerances): stacked, a
+  scenario's steps are shared with the others in its batch. A stacked run that fails gives
+  NaN for every scenario of the call (`fs.status(X)` says which failed), and `fs.steps(X)`
+  gives the shared count. `batch="vmap"` keeps the previous behaviour.
+
 ## [0.8.3] — 2026-11-15
 A bug-fix release. The first fix can change results: see `tq.known_issues()` on older versions.
 

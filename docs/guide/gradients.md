@@ -232,7 +232,7 @@ model structure; after that, new values reuse the build.
 
 For a population (one scenario per subject, each with its own doses and sampling times),
 give `sim.function` a list of scenarios. The result is one JAX function of a table of
-values, one row per scenario, and every scenario runs in one `jax.vmap` call of one build:
+values, one row per scenario, and every scenario runs in one call of one build:
 
 ```python
 subjects = [
@@ -267,9 +267,30 @@ The scenarios may differ in their number of doses, infusions and output times: e
 padded to the largest among them with slots the solver never reaches (at t = +inf), so the
 padding changes no value and no derivative, and every list of scenarios of one model shares
 one build. Names in `wrt` are those of a single scenario's function; a dose number
-(`"dose 2 amount"`) must exist in every scenario. Results agree with each scenario's own
-function to within the solver's tolerance: running in one `jax.vmap` call rounds
-differently, which can move a solver step.
+(`"dose 2 amount"`) must exist in every scenario.
+
+**Stacked or one by one.** By default (`batch="auto"`) the scenarios run as one stacked
+system: one state vector of all of them, one sequence of solver steps chosen for the least
+easy scenario (no scenario is solved less accurately than it would be alone), and the
+solver's linear algebra as one small block per scenario. For small models this is several
+times faster than running each scenario with its own steps (Friberg's myelosuppression
+model, 20 scenarios with 4 derivatives: 13 ms against 91 ms per run). `batch="vmap"` runs
+each scenario with its own steps, in one `jax.vmap` call; `fs.batch` says which was used:
+
+```python
+print(fs.batch)                                           # stacked
+fv = sim.function(subjects, wrt=["CL", "V"], batch="vmap")
+assert np.allclose(fv(fv.x0)["conc"][fv.mask], Y[fs.mask], rtol=1e-5)
+```
+
+What stacking changes: a scenario's results depend slightly on the others in its batch,
+within the solver's tolerance (with `batch="vmap"` they agree with each scenario's own
+function to the same tolerance, the batched arithmetic rounding differently); a stacked run
+that fails gives NaN for every scenario of the call, and `fs.status(X)` then says which one
+failed; `fs.steps(X)` gives the shared run's count. `"auto"` uses `vmap` where stacking does
+not apply: reverse derivatives, a model with events, conditions on time or more than 250
+states, scenarios that start at different times, or doses at many more distinct times than
+any one scenario has. `batch="stacked"` raises there, with the reason.
 
 ## How the derivatives are computed
 
