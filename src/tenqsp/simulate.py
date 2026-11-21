@@ -283,7 +283,8 @@ class Simulator:
         )
         return SimResult(sol, self.outputs, sc)
 
-    def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None, batch="auto"):
+    def function(self, scenario=None, *, wrt, derivatives="auto", record_room=None, batch=None,
+                 check=True):  # fmt: skip
         """The simulation as a JAX function of the numbers named in ``wrt``, for estimation
         and any JAX code: ``f = sim.function(scenario, wrt=["CL", "V"])``; ``f.names``,
         ``f.x0`` (their values in the scenario), ``f(x)`` -> ``{output: array}``, with ``x`` a
@@ -310,17 +311,22 @@ class Simulator:
         ``{output: (scenarios, times, ...)}``, NaN past each scenario's own times
         (``fs.t``, ``fs.mask``, ``fs.n_times``), ``fs.status(X)`` one status per scenario.
         Each scenario keeps its regimen, times, start and starting state; all run in one
-        call of one build, padded exactly (slots at t = +inf). ``batch=``: ``"stacked"`` (the
+        call of one build, padded exactly (slots at t = +inf). ``batch=``: ``"vmap"`` (the
+        default: each scenario its own steps, in one ``jax.vmap`` call) or ``"stacked"`` (the
         scenarios as one system, with one sequence of steps chosen for the least easy of
-        them: much faster for small models; a scenario's results then depend slightly on
-        the others in the batch, within the tolerances), ``"vmap"`` (each scenario its own
-        steps, in one ``jax.vmap`` call) or ``"auto"`` (the default: stacked where it applies,
-        see ``gradients``); ``fs.batch`` says which."""
+        them: several times faster for a small model and similar scenarios, slower where the
+        scenarios differ much, as a dose ladder does: see ``gradients``); ``fs.batch`` says
+        which. ``check=False``: no run of the scenarios
+        when the list is built (by default one call checks that each runs at its values, and
+        that call's compile serves later calls of ``fs``; a caller that compiles its own
+        function around ``fs`` would compile twice). Calls take ``rtol``, ``atol`` and
+        ``max_steps`` for that call, without a new compile, and ``with_steps=True`` for the
+        steps of the same run."""
         from tenqsp.gradients import function
 
         return function(
             self, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
-            batch=batch,
+            batch=batch, check=check,
         )  # fmt: skip
 
     def sensitivity(self, scenario: Scenario | None = None, *, wrt, relative: bool = False):

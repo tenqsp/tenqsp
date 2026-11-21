@@ -50,10 +50,15 @@ factorisation of the block-diagonal matrix for all scenarios) took 2.0 s.
 
 ## Decision
 
-1. **`batch=` on `sim.function([...])`**: `"stacked"`, `"vmap"` or `"auto"` (the default),
-   reported as `fs.batch`. `"auto"` stacks when every condition below holds and uses `vmap`
-   otherwise; `"stacked"` where a condition fails raises with the reason; `batch=` on a single
-   scenario raises.
+1. **`batch=` on `sim.function([...])`**: `"vmap"` (the default) or `"stacked"`, reported as
+   `fs.batch`; `"stacked"` where a condition below fails raises with the reason; `batch=` on a
+   single scenario raises. (Revised before release, 2026-11-21: the first form of this record
+   made `"auto"`, stacked wherever the conditions hold, the default. Measured after: on a
+   pooled fit of 6 arms whose doses span 9 decades (8 states), the shared run took 996 steps
+   against at most 460 for one arm, and the fit 2 times as long; on a model with a chain of
+   cells and 6 such arms, stacking was slower from 33 states on and even at 13. How
+   much the scenarios differ, which sets the shared steps, is not known before the run, so
+   stacking is asked for, not chosen.)
 2. **The stacked run**: one `bdf` call per segment on the stacked state, with the right-hand
    side and its Jacobian mapped over scenarios; the iteration matrix as dense blocks, never
    assembled (an explicit inverse per block up to 16 states, an LU per block above).
@@ -65,7 +70,7 @@ factorisation of the block-diagonal matrix for all scenarios) took 2.0 s.
    (each scenario's doses applied to its own block) and writes every scenario's state at the
    union of their output times; each scenario's outputs are picked from it. Forward
    sensitivities jump at each scenario's own moving boundaries, as in a single run.
-5. **When `"auto"` stacks**: two or more scenarios; derivatives `"forward"` or `False`
+5. **When stacking applies**: two or more scenarios; derivatives `"forward"` or `False`
    (reverse derivatives replay a record per run: not stacked); no events (extinction
    thresholds, conditions on the state), no conditions on time, no noise floors; the dense
    tier (at most `SPARSE_FROM_STATES` states); the same start time; and doses at no more

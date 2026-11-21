@@ -109,3 +109,41 @@ def test_a_new_max_steps_compiles_nothing_new():
     g(x), g.steps(x), g.status(x)
     assert {k for k in cm._lazy if isinstance(k, tuple)} == builds
     assert {k: v._cache_size() for k, v in cm._lazy.items() if hasattr(v, "_cache_size")} == sizes
+
+
+@pytest.mark.parametrize("batch", ["vmap", "stacked"])
+def test_max_steps_and_steps_at_call_time(batch):
+    """``fs(X, max_steps=...)`` limits that call, without a new build or compile, as the
+    simulator's ``max_steps`` does; ``with_steps=True`` gives ``fs.steps(X)`` from the same run,
+    also inside ``jax.jit``; ``status`` takes the same limit."""
+    import jax
+
+    scs = [scenario(ONE), scenario(TWO, ka=0.8)]
+    fs = simulator().function(scs, wrt=["ka", "CL"], batch=batch)
+    X = jnp.asarray(fs.x0)
+    n = fs.steps(X)
+    out, steps = fs(X, with_steps=True)
+    assert tuple(int(v) for v in steps) == n
+    np.testing.assert_array_equal(out["conc"], fs(X)["conc"])
+    f = jax.jit(lambda X_, m: fs(X_, max_steps=m, with_steps=True))
+    _, at = f(X, max(n))
+    assert tuple(int(v) for v in at) == n
+    y, _ = f(X, max(n) - 1)  # one step short: a NaN run, from the same compiled function
+    assert np.isnan(np.asarray(y["conc"])).any()
+    assert "too many steps" in fs.status(X, max_steps=max(n) - 1)
+    assert f._cache_size() == 1
+    with pytest.raises(ValueError, match="max_steps must be a whole number"):
+        fs(X, max_steps=0)
+
+
+def test_a_list_is_checked_when_built_unless_check_false():
+    """A scenario that does not run at its values raises when the list is built, naming it;
+    ``check=False`` builds without running (the first call says, by NaN and ``fs.status``)."""
+    sim = simulator(max_steps=3)
+    scs = [scenario(ONE), scenario(TWO)]
+    with pytest.raises(jb.SolverError, match="scenario 1"):
+        sim.function(scs, wrt=["ka", "CL"], batch="vmap")
+    fs = sim.function(scs, wrt=["ka", "CL"], batch="vmap", check=False)
+    assert set(fs.status(jnp.asarray(fs.x0))) == {"too many steps"}
+    with pytest.raises(ValueError, match="check= is for a list"):
+        sim.function(scenario(ONE), wrt=["ka"], check=False)

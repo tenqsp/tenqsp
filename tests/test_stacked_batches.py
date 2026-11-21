@@ -124,14 +124,17 @@ def test_second_derivatives_forward_over_forward(m):
         np.testing.assert_allclose(H[i, :, i, :], Hc, rtol=1e-5, atol=1e-10)
 
 
-def test_auto_chooses_and_says_why_not(m):
+def test_vmap_by_default_stacked_when_asked_and_why_not(m):
+    """``batch="vmap"`` by default (stacking is slower where the scenarios differ much: the
+    shared steps are those of the least easy at every moment); ``"stacked"`` when asked, and
+    refused with the reason where it does not apply."""
     sim = m.simulator(outputs=["conc"])
-    assert sim.function(scenarios(), wrt=["ka"]).batch == "stacked"
-    assert sim.function(scenarios(), wrt=["ka"], derivatives="reverse").batch == "vmap"
+    assert sim.function(scenarios(), wrt=["ka"]).batch == "vmap"
+    assert sim.function(scenarios(), wrt=["ka"], batch="stacked").batch == "stacked"
     with pytest.raises(ValueError, match="reverse derivatives"):
         sim.function(scenarios(), wrt=["ka"], derivatives="reverse", batch="stacked")
-    with pytest.raises(ValueError, match="batch= is 'auto'"):
-        sim.function(scenarios(), wrt=["ka"], batch="stack")
+    with pytest.raises(ValueError, match="batch= is 'vmap'"):
+        sim.function(scenarios(), wrt=["ka"], batch="auto")
     with pytest.raises(ValueError, match="for a list of scenarios"):
         sim.function(scenarios()[0], wrt=["ka"], batch="vmap")
     with pytest.raises(ValueError, match="one scenario"):
@@ -139,7 +142,8 @@ def test_auto_chooses_and_says_why_not(m):
     # doses at many different times: the shared run would restart at each
     times = [[0.37 * i + 0.11 * j for j in range(3)] for i in range(12)]
     many = [tq.Scenario(regimen=tq.bolus("depot", 10, times=t), times=(30,)) for t in times]
-    assert sim.function(many, wrt=["ka"]).batch == "vmap"
+    with pytest.raises(ValueError, match="different times"):
+        sim.function(many, wrt=["ka"], batch="stacked")
 
 
 def test_events_stay_one_by_one():
@@ -155,6 +159,8 @@ observable y = B
     sim = ext.simulator(outputs=["y"])
     scs = [tq.Scenario(params={"k": k}, times=(1, 2, 4)) for k in (1.5, 2.0)]
     assert sim.function(scs, wrt=["r"]).batch == "vmap"
+    with pytest.raises(ValueError, match="events"):
+        sim.function(scs, wrt=["r"], batch="stacked")
 
 
 def test_a_failing_run_fails_the_batch_and_status_says_which(m):

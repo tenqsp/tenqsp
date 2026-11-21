@@ -6,19 +6,24 @@ versioning; `0.x` releases may change the API.
 ## [Unreleased]
 
 ### Added
-- **Stacked batches** (ADR 0010): `sim.function([sc1, sc2, ...], wrt=...)` runs the scenarios
-  as one system, with one sequence of steps chosen for the least easy of them and the
-  iteration matrix as one block per scenario: for small models several times faster than one
-  `jax.vmap` call (Friberg's myelosuppression model, 20 scenarios with 4 sensitivities: 13 ms
-  against 91 ms). `batch=` chooses: `"auto"` (the default: stacked where it applies),
-  `"stacked"` or `"vmap"`; `fs.batch` says which. Stacked runs need derivatives `"forward"`
-  or `False`, no events or conditions on time, the dense tier and one start time.
-
-### Changed
-- **A batch's results can change slightly** (within the solver's tolerances): stacked, a
-  scenario's steps are shared with the others in its batch. A stacked run that fails gives
-  NaN for every scenario of the call (`fs.status(X)` says which failed), and `fs.steps(X)`
-  gives the shared count. `batch="vmap"` keeps the previous behaviour.
+- **Stacked batches** (ADR 0010): `sim.function([sc1, sc2, ...], wrt=..., batch="stacked")`
+  runs the scenarios as one system, with one sequence of steps chosen for the least easy of
+  them and the iteration matrix as one block per scenario: for a small model and similar
+  scenarios several times faster than one `jax.vmap` call (Friberg's myelosuppression model,
+  20 subjects with 4 sensitivities: 13 ms against 91 ms), slower where the scenarios differ
+  much (a ladder of doses over 9 decades: 2.2 times the steps, 2 times the time).
+  `batch="vmap"` stays the default; `fs.batch` says which. Stacked runs need derivatives
+  `"forward"` or `False`, no events or conditions on time, the dense tier and one start time;
+  a stacked run that fails gives NaN for every scenario of the call (`fs.status(X)` says
+  which failed).
+- **Call-time step limit and step counts**: `fs(X, max_steps=...)` (and `f(x, ...)`,
+  `status`, `steps`) limits that call's steps, like `rtol` and `atol`, without a new compile;
+  `with_steps=True` returns the steps of the same run with the outputs, also inside
+  `jax.jit`.
+- **`sim.function([...], check=False)`**: no run of the scenarios when the list is built. By
+  default one call of the build checks that each scenario runs (its compile then serves the
+  later calls); before, each scenario ran through a program of its own, compiled separately
+  (with forward derivatives this check no longer costs a compile per scenario).
 
 ## [0.8.3] — 2026-11-15
 A bug-fix release. The first fix can change results: see `tq.known_issues()` on older versions.

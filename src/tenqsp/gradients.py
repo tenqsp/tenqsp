@@ -59,8 +59,8 @@ RECORD_ROOM = 2  # the record holds 2x the steps of the run at the scenario's va
 # default (``record_room=``; design decision 2026-11-12, replacing 4x / 2x above 2,000 states:
 # memory grows with states x room, and a gradient at x0 uses only 1x)
 REUSE_WITHIN = 1.5  # a build whose record is at most this much larger is shared
-BATCH = ("auto", "stacked", "vmap")  # FunctionBatch's batch= (ADR 0010)
-# batch="auto" stacks the scenarios unless their doses fall at so many different times that
+BATCH = ("vmap", "stacked")  # FunctionBatch's batch= (ADR 0010; "vmap" the default)
+# batch="stacked" is refused where the scenarios' doses fall at so many different times that
 # the shared run restarts far more often than any one scenario would: more distinct dose and
 # infusion times among all of them than this many times the most of any one, plus this many
 STACK_TIMES_FACTOR = 4
@@ -143,26 +143,30 @@ class Function:
             self.record_room,
         )
 
-    def __call__(self, x, *, rtol=None, atol=None) -> dict[str, jax.Array]:
-        data = _tolerances(self._data, rtol, atol)
-        out, _, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
-        return {k: v[: self._n_t] for k, v in out.items()}
+    def __call__(self, x, *, rtol=None, atol=None, max_steps=None, with_steps=False):
+        """``{output: array}`` at ``x``; ``rtol``, ``atol``, ``max_steps``: this call's (None:
+        the simulator's). ``with_steps=True``: ``(outputs, steps)``, ``steps`` as
+        ``self.steps`` gives it, from the same run (traceable: inside ``jax.jit`` too)."""
+        data = _tolerances(self._data, rtol, atol, max_steps)
+        out, _, most = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
+        out = {k: v[: self._n_t] for k, v in out.items()}
+        return (out, jax.lax.stop_gradient(most)) if with_steps else out
 
-    def status(self, x, *, rtol=None, atol=None) -> str:
+    def status(self, x, *, rtol=None, atol=None, max_steps=None) -> str:
         """``"ok"``, or why the run at ``x`` failed (its outputs are NaN)."""
-        data = _tolerances(self._data, rtol, atol)
+        data = _tolerances(self._data, rtol, atol, max_steps)
         _, code, _ = self._impl(jnp.asarray(x, dtype=jnp.float64), data)
         code = int(code)
         if code == RECORD_FULL:
             return _record_full_text(self.capacity, self._need, self.record_room)
         return "ok" if code == OK else _STATUS.get(code, f"status {code}")
 
-    def steps(self, x, *, rtol=None, atol=None) -> int:
+    def steps(self, x, *, rtol=None, atol=None, max_steps=None) -> int:
         """The most solver steps that the run of ``f(x)`` takes between two doses or events:
         the simulator's ``max_steps`` is a limit on this number. Counted also when the run
         fails. For setting ``max_steps`` from the work a run takes at reasonable values."""
         x = jax.lax.stop_gradient(jnp.asarray(x, dtype=jnp.float64))  # a count
-        _, _, most = self._impl(x, _tolerances(self._data, rtol, atol))
+        _, _, most = self._impl(x, _tolerances(self._data, rtol, atol, max_steps))
         return int(most)
 
     def unpack(self, x) -> dict[str, float]:
@@ -196,13 +200,13 @@ class FunctionBatch:
 
     def __init__(
         self, sim, scenarios, *, wrt: Sequence[str], derivatives="auto", record_room=None,
-        batch="auto",
+        batch="vmap", check=True,
     ):  # fmt: skip
         from tenqsp.simulate import Scenario
 
         derivatives = _derivatives_option(derivatives)
         if batch not in BATCH:
-            raise ValueError(f"batch= is 'auto' (the default), 'stacked' or 'vmap', not {batch!r}.")
+            raise ValueError(f"batch= is 'vmap' (the default) or 'stacked', not {batch!r}.")
         scenarios = tuple(scenarios)
         if not scenarios:
             raise ValueError("Give at least one scenario.")
@@ -250,10 +254,14 @@ class FunctionBatch:
         self._data = jax.tree.map(lambda *a: jnp.stack(a), *datas)
         self.derivatives = _choose(derivatives, len(names))
         self.record_room = _room_option(record_room, self.derivatives)
-        need = max(
-            _probe(cm, run, d, x0, self.derivatives)
-            for (run, _), d, x0 in zip(runs, datas, self.x0, strict=True)
-        )
+        # reverse derivatives size their record from a run of each scenario (which also
+        # checks that it runs); otherwise the batch is checked below, in one call of its build
+        need = 0
+        if self.derivatives == "reverse":
+            need = max(
+                _probe(cm, run, d, x0, self.derivatives)
+                for (run, _), d, x0 in zip(runs, datas, self.x0, strict=True)
+            )
         self._need = need
         impl, self.capacity = _program_for(
             cm,
@@ -279,9 +287,8 @@ class FunctionBatch:
         # stacked or one jax.vmap call (ADR 0010)
         why = _why_not_stacked(cm, self.derivatives, runs, len(scenarios))
         if batch == "stacked" and why is not None:
-            raise ValueError(f"batch='stacked' is not possible here: {why}. Use batch='vmap' "
-                             "(or 'auto', which chooses).")  # fmt: skip
-        self.batch = "stacked" if batch != "vmap" and why is None else "vmap"
+            raise ValueError(f"batch='stacked' is not possible here: {why}. Use batch='vmap'.")
+        self.batch = batch
         self._vmap_impl = self._impl
         if self.batch == "stacked":
             t_all = np.stack([np.asarray(run.args["t_out"], dtype=np.float64) for run, _ in runs])
@@ -294,26 +301,55 @@ class FunctionBatch:
             # the layout of the times is an input: new times of the same shape compile nothing
             layout = (jnp.asarray(union, dtype=jnp.float64), jnp.asarray(rows, dtype=jnp.int64))
             self._impl = lambda X, data: stacked(X, data, *layout)
+        if check and self.derivatives != "reverse":
+            self._check_runs(runs)
+
+    def _check_runs(self, runs) -> None:
+        """Every scenario runs at its own values: one call of the build (its compile is then
+        reused by calls of ``fs``); a scenario that does not run raises, with the solver's
+        reason. ``check=False`` leaves it to the first call (``fs.status`` says why)."""
+        _, codes, _ = self._impl(jnp.asarray(self.x0), self._data)
+        if np.all(np.asarray(codes) == OK):
+            return
+        if self.batch == "stacked":
+            _, codes, _ = self._vmap_impl(jnp.asarray(self.x0), self._data)
+        for i, c in enumerate(np.asarray(codes)):
+            if int(c) != OK:
+                run = runs[i][0]
+                probe = jb._program(self._cm, ledger=False, model_doses=run.model_doses)
+                args, _ = _inputs(jnp.asarray(self.x0[i]), jax.tree.map(lambda a, i=i: a[i],
+                                                                        self._data),
+                                  run.model_doses)  # fmt: skip
+                try:
+                    jb._check(self._cm, probe(**args), run)
+                except Exception as e:  # noqa: BLE001 - re-raised with the scenario named
+                    raise type(e)(f"scenario {i + 1} ({_label(self.scenarios[i])}): {e}") from None
+                raise jb.SolverError(f"scenario {i + 1} ({_label(self.scenarios[i])}) does not "
+                                  f"run at its values: {_STATUS.get(int(c), int(c))}.")  # fmt: skip
 
     def __len__(self) -> int:
         return len(self.scenarios)
 
-    def __call__(self, X, *, rtol=None, atol=None) -> dict[str, jax.Array]:
-        out, _, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+    def __call__(self, X, *, rtol=None, atol=None, max_steps=None, with_steps=False):
+        """``{output: (scenarios, times, ...)}`` at ``X``; ``rtol``, ``atol``, ``max_steps``:
+        this call's (None: the simulator's). ``with_steps=True``: ``(outputs, steps)``, one
+        count per scenario as ``self.steps`` gives it, from the same run (traceable)."""
+        out, _, most = self._impl(self._x(X), _tolerances(self._data, rtol, atol, max_steps))
         result = {}
         for k, v in out.items():
             v = v[:, : self._T]
             m = self._mask.reshape(self._mask.shape + (1,) * (v.ndim - 2))
             result[k] = jnp.where(m, v, jnp.nan)
-        return result
+        return (result, jax.lax.stop_gradient(most)) if with_steps else result
 
-    def status(self, X, *, rtol=None, atol=None) -> tuple[str, ...]:
+    def status(self, X, *, rtol=None, atol=None, max_steps=None) -> tuple[str, ...]:
         """``"ok"``, or why the run failed (its outputs are NaN), for each scenario. (A stacked
         run that fails gives NaN for every scenario; this then runs them one by one, to say
         which failed and why.)"""
-        _, codes, _ = self._impl(self._x(X), _tolerances(self._data, rtol, atol))
+        data = _tolerances(self._data, rtol, atol, max_steps)
+        _, codes, _ = self._impl(self._x(X), data)
         if self.batch == "stacked" and np.any(np.asarray(codes) != OK):
-            _, codes, _ = self._vmap_impl(self._x(X), _tolerances(self._data, rtol, atol))
+            _, codes, _ = self._vmap_impl(self._x(X), data)
         full = _record_full_text(self.capacity, self._need, self.record_room or RECORD_ROOM)
         return tuple(
             full
@@ -322,11 +358,11 @@ class FunctionBatch:
             for c in np.asarray(codes)
         )
 
-    def steps(self, X, *, rtol=None, atol=None) -> tuple[int, ...]:
+    def steps(self, X, *, rtol=None, atol=None, max_steps=None) -> tuple[int, ...]:
         """The most solver steps between two doses or events, for each scenario (see
         ``Function.steps``)."""
         X = jax.lax.stop_gradient(self._x(X))  # a count
-        _, _, most = self._impl(X, _tolerances(self._data, rtol, atol))
+        _, _, most = self._impl(X, _tolerances(self._data, rtol, atol, max_steps))
         return tuple(int(m) for m in np.asarray(most))
 
     def _x(self, X):
@@ -779,15 +815,26 @@ def _x0(run, where, regimen) -> np.ndarray:
     return np.asarray(out, dtype=np.float64)
 
 
-def _tolerances(data, rtol, atol) -> dict:
-    """``data`` with the tolerances of one call (None: the simulator's). The tolerances are
-    inputs of the compiled program, so a new value reruns it without a new compile. ``rtol``
-    is one positive number; ``atol`` one, or one per state. With ``derivatives="reverse"``
-    the record's room was sized at the simulator's tolerances: a much tighter ``rtol`` can
-    need more steps than it holds, and that run gives NaN with the status "record full"."""
-    if rtol is None and atol is None:
+def _tolerances(data, rtol, atol, max_steps=None) -> dict:
+    """``data`` with the tolerances and step limit of one call (None: the simulator's). They
+    are inputs of the compiled program, so a new value reruns it without a new compile.
+    ``rtol`` is one positive number; ``atol`` one, or one per state; ``max_steps`` one
+    positive whole number. With ``derivatives="reverse"`` the record's room was sized at the
+    simulator's tolerances: a much tighter ``rtol`` can need more steps than it holds, and
+    that run gives NaN with the status "record full"."""
+    if rtol is None and atol is None and max_steps is None:
         return data
     data = dict(data)
+    if max_steps is not None:
+        m = jnp.asarray(max_steps)
+        try:
+            ok = bool(jnp.all(m >= 1)) and float(jnp.max(m)) == float(jnp.round(jnp.max(m)))
+        except jax.errors.ConcretizationTypeError:  # a traced value (inside jit): not checked
+            ok = True
+        if not ok:
+            raise ValueError(f"max_steps must be a whole number of at least 1, got {max_steps!r}.")
+        data["max_steps"] = jnp.broadcast_to(m.astype(data["max_steps"].dtype),
+                                             data["max_steps"].shape)  # fmt: skip
     if rtol is not None:
         r = _positive(rtol, "rtol")
         data["rtol"] = jnp.broadcast_to(r, data["rtol"].shape)
@@ -1156,16 +1203,18 @@ def _formula_program(cm, model_doses: bool, outputs, derivatives: bool):
 
 
 def function(
-    sim, scenario=None, *, wrt, derivatives="auto", record_room=None, batch="auto"
+    sim, scenario=None, *, wrt, derivatives="auto", record_room=None, batch=None, check=True
 ) -> Function | FunctionBatch:
     """See ``function``."""
     if isinstance(scenario, list | tuple):
         return FunctionBatch(
             sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room,
-            batch=batch,
+            batch="vmap" if batch is None else batch, check=check,
         )  # fmt: skip
-    if batch != "auto":
+    if batch is not None:
         raise ValueError("batch= is for a list of scenarios (sim.function([sc1, sc2, ...])).")
+    if check is not True:
+        raise ValueError("check= is for a list of scenarios (sim.function([sc1, sc2, ...])).")
     return Function(sim, scenario, wrt=wrt, derivatives=derivatives, record_room=record_room)
 
 
