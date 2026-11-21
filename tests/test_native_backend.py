@@ -146,3 +146,15 @@ def test_a_model_with_an_axis():
         compare(sim2, scs, names, rel=1e-7)
     finally:
         translate.SCALAR_MAX = old
+
+
+def test_nested_batches():
+    """A batch of scenario tables (``jax.vmap`` over ``fs``, as a population fit's inner
+    steps take): every input reaches the native solve with two leading axes."""
+    sim = tq.Model.from_text(PK).simulator(outputs=["conc"], **TIGHT)
+    fj = sim.function(boluses(), wrt=["ka", "CL"])
+    fn = sim.function(boluses(), wrt=["ka", "CL"], backend="native")
+    Xs = jnp.stack([jnp.asarray(fj.x0), jnp.asarray(fj.x0) * 1.1])
+    yj = jax.vmap(lambda X: fj(X)["conc"])(Xs)
+    yn = jax.vmap(lambda X: fn(X)["conc"])(Xs)
+    np.testing.assert_allclose(np.asarray(yn), np.asarray(yj), rtol=1e-8)

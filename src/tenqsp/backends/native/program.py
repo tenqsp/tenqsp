@@ -296,34 +296,39 @@ def _pool():
     return _POOL
 
 
+# the rank of each input of ``run_one`` (theta, its derivatives, y0, ..., max_steps): a batch
+# (``jax.vmap``, nested or not) adds leading axes to every one
+_RANKS = (1, 2, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 2, 1, 1, 2, 0, 0, 1, 0, 1, 0, 0)
+_INTS = (6, 13, 22)  # b_index, i_index, max_steps
+
+
 def _host(mod):
-    """The callback: numpy arrays in (a batch, when vmapped: a leading axis on every input),
-    each scenario solved natively (on the pool's threads), numpy arrays out."""
+    """The callback: numpy arrays in (under ``jax.vmap``, with the same leading batch axes on
+    every input), each scenario solved natively on the pool's threads, numpy arrays out
+    with those leading axes."""
 
     def call(*ins):
         ins = [np.asarray(a) for a in ins]
-        batched = ins[2].ndim == 2  # y0: (n,) alone, (units, n) in a batch
-        if not batched:
-            ins = [a[None] for a in ins]
-        ints = (6, 13, 22)  # b_index, i_index, max_steps
-        ins = [np.ascontiguousarray(a, dtype=np.int64 if k in ints else np.float64)
-               for k, a in enumerate(ins)]  # fmt: skip
-        U = ins[0].shape[0]
+        batch = ins[2].shape[: ins[2].ndim - _RANKS[2]]  # y0's leading axes
+        U = int(np.prod(batch)) if batch else 1
+        flat = []
+        for k, (a, r) in enumerate(zip(ins, _RANKS, strict=True)):
+            a = np.broadcast_to(a, batch + a.shape[a.ndim - r :]) if a.ndim - r != len(batch) else a
+            a = a.reshape((U,) + a.shape[len(batch) :])
+            flat.append(np.ascontiguousarray(a, dtype=np.int64 if k in _INTS else np.float64))
 
         def one(j):
-            args = [a[j] for a in ins]
+            args = [f[j] for f in flat]
             for k in (16, 17, 19, 21):  # t0, t1, rtol, max_step: numbers
                 args[k] = float(args[k])
             args[22] = int(args[22])
             return mod.run_one(*args)
 
         outs = list(_pool().map(one, range(U))) if U > 1 else [one(0)]
-        YS = np.stack([o[0] for o in outs])
-        SS = np.stack([o[1] for o in outs])
-        st = np.array([o[2] for o in outs], dtype=np.int64)
-        mo = np.array([o[3] for o in outs], dtype=np.int64)
-        if not batched:
-            return YS[0], SS[0], st[0], mo[0]
+        YS = np.stack([o[0] for o in outs]).reshape(batch + outs[0][0].shape)
+        SS = np.stack([o[1] for o in outs]).reshape(batch + outs[0][1].shape)
+        st = np.array([o[2] for o in outs], dtype=np.int64).reshape(batch)
+        mo = np.array([o[3] for o in outs], dtype=np.int64).reshape(batch)
         return YS, SS, st, mo
 
     return call
