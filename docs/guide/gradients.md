@@ -232,7 +232,7 @@ model structure; after that, new values reuse the build.
 
 For a population (one scenario per subject, each with its own doses and sampling times),
 give `sim.function` a list of scenarios. The result is one JAX function of a table of
-values, one row per scenario, and every scenario runs in one `jax.vmap` call of one build:
+values, one row per scenario, and every scenario runs in one call of one build:
 
 ```python
 subjects = [
@@ -267,9 +267,54 @@ The scenarios may differ in their number of doses, infusions and output times: e
 padded to the largest among them with slots the solver never reaches (at t = +inf), so the
 padding changes no value and no derivative, and every list of scenarios of one model shares
 one build. Names in `wrt` are those of a single scenario's function; a dose number
-(`"dose 2 amount"`) must exist in every scenario. Results agree with each scenario's own
-function to within the solver's tolerance: running in one `jax.vmap` call rounds
-differently, which can move a solver step.
+(`"dose 2 amount"`) must exist in every scenario.
+
+**Stacked or one by one.** By default (`batch="vmap"`) each scenario runs with its own
+steps, in one `jax.vmap` call. `batch="stacked"` runs the scenarios as one stacked system:
+one state vector of all of them, one sequence of solver steps chosen for the least easy
+scenario at every moment (no scenario is solved less accurately than it would be alone), and
+the solver's linear algebra as one small block per scenario. For a small model and similar
+scenarios (subjects of one study) this is several times faster (Friberg's myelosuppression
+model, 20 subjects with 4 derivatives: 13 ms against 91 ms per run). Where the scenarios
+differ much (a ladder of doses over several decades) the shared steps are many more than any
+one scenario needs, and stacking is slower: time both on your scenarios. `fs.batch` says
+which was used:
+
+```python
+fv = sim.function(subjects, wrt=["CL", "V"])                   # one by one (vmap)
+fs = sim.function(subjects, wrt=["CL", "V"], batch="stacked")
+print(fs.batch)                                           # stacked
+assert np.allclose(fv(fv.x0)["conc"][fv.mask], fs(fs.x0)["conc"][fs.mask], rtol=1e-5)
+```
+
+What stacking changes: a scenario's results depend slightly on the others in its batch,
+within the solver's tolerance; a stacked run that fails gives NaN for every scenario of the
+call, and `fs.status(X)` then says which one failed; `fs.steps(X)` gives the shared run's
+count. Stacking is refused, with the reason, for reverse derivatives, a model with events,
+conditions on time or more than 250 states, scenarios that start at different times, or
+doses at many more distinct times than any one scenario has.
+
+**Options of a call.** `fs(X, rtol=..., atol=..., max_steps=...)` runs that call at other
+tolerances or step limit without a new compile (they are inputs of the compiled program);
+`fs(X, with_steps=True)` returns `(outputs, steps)`, the steps of the same run (inside
+`jax.jit` too). A list of scenarios is checked when it is built (one call: each scenario
+must run at its own values); `check=False` leaves that to the first call, for code that
+compiles its own function around `fs`.
+
+**The native backend.** `sim.function([...], wrt=..., backend="native")` runs the same
+computation with TenQSP's BDF compiled by numba instead of XLA (install with
+`pip install "tenqsp[native]"`). On the CPU it is several times faster per run, and up to
+15 times on models with a hundred states: XLA runs each solver step as hundreds of small
+operations, each with a fixed cost. The two backends take the same steps up to round-off, so
+results agree closely; `fs.backend` says which one ran. The first build of a model compiles
+its native solver (seconds to a minute, cached on disk: later builds load it). It covers
+forward and no derivatives, and models without events or conditions on time; elsewhere it is
+refused, with the reason, and the JAX backend runs.
+
+```python
+fn = sim.function(subjects, wrt=["CL", "V"], backend="native")
+assert np.allclose(fn(fn.x0)["conc"][fn.mask], fv(fv.x0)["conc"][fv.mask], rtol=1e-6)
+```
 
 ## How the derivatives are computed
 

@@ -35,6 +35,7 @@ from collections.abc import Mapping, Sequence
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.linalg as jsl
 import numpy as np
 
 from tenqsp.backends.jax_bdf import (
@@ -955,6 +956,284 @@ def _program(
         z_last = jnp.concatenate([s["z"], s["zs"].reshape(-1)]) if P else s["z"]
         ys = jnp.where(last, z_last, s["ys"])
         return {**s, "ys": ys, "t": s["a"], "b_amount": b_amount}
+
+    jitted = jax.jit(program)
+    cm._lazy[key] = jitted
+    return jitted
+
+
+# ----------------------------------------------------------------------------- stacked batches
+# Stacked batches (ADR 0010): the scenarios of one build as one system, with one step-size
+# sequence, the error norm of the least easy unit, and the iteration matrix as blocks, one per
+# unit (dense: an explicit inverse up to INVERSE_UP_TO states, an LU per block above).
+INVERSE_UP_TO = 16
+
+
+def stacked_linear(units: int, n: int):
+    """The ``LinearSolver`` of a stacked batch of ``units`` dense blocks of ``n`` states: the
+    Jacobian is ``(units, n, n)`` and is never assembled into one matrix."""
+    from tenqsp.backends import jax_bdf
+
+    eye = jnp.eye(n)
+    if n <= INVERSE_UP_TO:
+
+        def factor(J, c):
+            return jnp.linalg.inv(eye[None] - c * J)
+
+        def solve(F, b):
+            return jnp.sum(F * b.reshape(units, 1, n), axis=2).reshape(-1)
+
+        return jax_bdf.LinearSolver(
+            factor=factor, solve=solve, empty=lambda J: jnp.broadcast_to(eye, J.shape)
+        )
+
+    def factor_lu(J, c):
+        return jax.vmap(jsl.lu_factor)(eye[None] - c * J)
+
+    def solve_lu(F, b):
+        return jax.vmap(jsl.lu_solve)(F, b.reshape(units, n)).reshape(-1)
+
+    return jax_bdf.LinearSolver(
+        factor=factor_lu,
+        solve=solve_lu,
+        empty=lambda J: jax.vmap(jsl.lu_factor)(jnp.broadcast_to(eye, J.shape)),
+    )
+
+
+def stacked_unsupported(cm: CompiledModel) -> str | None:
+    """Why this model's batches cannot be stacked (None: they can)."""
+    if cm.extinction_groups or cm.switch_events:
+        return "the model has events (an extinction threshold or a condition on its state)"
+    if cm.plan.switch_slot is not None:
+        return "the model has conditions on time (the stacked run has no switch times yet)"
+    if cm.floor_slots:
+        return "the model has noise floors"
+    if tier(cm) == "sparse":
+        return (
+            f"the model has {cm.n_states} states (stacked batches use dense blocks, up to "
+            f"{SPARSE_FROM_STATES})"
+        )
+    if cm.n_states == 0:
+        return "the model has no states"
+    return None
+
+
+def _stacked_program(cm: CompiledModel, *, model_doses: bool, forward: int = 0, units: int):
+    """The jitted solve of ``units`` scenarios as one stacked system (ADR 0010), for a model
+    ``stacked_unsupported`` allows. The inputs are those of ``_program`` with a leading axis
+    of units (``theta (U, ...)``, ``t1 (U,)``, ``b_time (U, k)``, ..., ``atol (U, n)``,
+    ``y_start (U, n)``; ``dot`` entries ``(U, p, ...)``), except ``t0``, ``rtol``,
+    ``max_step`` and ``max_steps`` (one for all) and ``t_out`` (the sorted union of the units'
+    output times, written for all). Returns ``ys (T, U * n * (1 + p))`` (the state of every
+    unit, then the derivatives direction by direction, each with every unit), the status and
+    the most steps in one segment (one for all) and the counts."""
+    P = forward
+    key = ("jax_stacked", model_doses, ("forward", P), units)
+    if key in cm._lazy:
+        return cm._lazy[key]
+    from tenqsp.backends.jax_bdf import bdf
+
+    U, n = units, cm.n_states
+    geom = cm.geom
+    rhs = cm._rhs_impl
+    linear = stacked_linear(U, n)
+
+    def jac_one(t, z, th):
+        return cm.jacobian_jax(t, z, th, ledger=False)
+
+    def program(theta, t0, t1, t_out, b_time, b_index, b_amount, i_start, i_stop, i_index,
+                i_rate, rtol, atol, max_step, max_steps, y_start=None, dot=None):  # fmt: skip
+        def inputs(theta, b_time, b_amount, i_start, i_stop, i_rate, b_index, i_index, y_st):
+            measure = cm._measure_impl(theta, geom)
+            if model_doses:
+                k = b_time.shape[0]
+                amounts = cm._dose_impl(theta, geom)
+                b_amount = jnp.zeros(k).at[: amounts.shape[0]].set(amounts)
+            b_time, i_start, i_stop, rise, i_rise, bad = arrive(
+                cm, theta, geom, measure, b_time, b_index, b_amount, i_start, i_stop, i_index,
+                i_rate,
+            )  # fmt: skip
+            y0 = cm._y0_impl(theta, geom)
+            if y_st is not None:
+                y0 = jnp.where(jnp.isnan(y_st), y0, y_st)
+            return (b_amount, b_time, i_start, i_stop, rise, i_rise, y0), bad
+
+        if model_doses:
+            b_amount = jnp.zeros_like(b_time)
+        primals = (theta, b_time, b_amount, i_start, i_stop, i_rate)
+        names_in = ("theta", "b_time", "b_amount", "i_start", "i_stop", "i_rate")
+
+        def unit_inputs(prim, b_idx, i_idx, y_st, tang):
+            f = lambda *pr: inputs(*pr, b_idx, i_idx, y_st)  # noqa: E731
+            if not P:
+                return f(*prim), None
+            got, dgot, bad = jax.vmap(
+                lambda tg: jax.jvp(f, prim, tg, has_aux=True), out_axes=(None, 0, None)
+            )(tang)
+            return (got, bad), dgot
+
+        if P:
+            tangents = tuple(
+                jnp.zeros((U, P) + p.shape[1:]) if dot.get(k) is None else dot[k]
+                for k, p in zip(names_in, primals, strict=True)
+            )
+        else:
+            tangents = tuple(jnp.zeros((U, 0)) for _ in primals)
+        y_st = y_start if y_start is not None else jnp.full((U, n), jnp.nan)
+        (got, bad_arrival), dgot = jax.vmap(unit_inputs)(primals, b_index, i_index, y_st, tangents)
+        b_amount, b_time, i_start, i_stop, rise, i_rise, y0 = got  # each (U, ...)
+        if P:
+            theta_dot = tangents[0]  # (U, P, n_theta)
+            _, b_time_dot, i_start_dot, i_stop_dot, rise_dot, i_rise_dot, y0_dot = dgot
+        bad_regimen = (
+            jnp.any(b_time < t0) | jnp.any(i_start < t0) | jnp.any(i_stop < i_start)
+            | jnp.any(b_amount < 0) | jnp.any(i_rate < 0)
+        )  # fmt: skip
+        T1 = jnp.max(t1)
+
+        def apply_doses(Z, at):
+            hit = b_time == at  # (U, k)
+            return jax.vmap(lambda z, bi, h, r: z.at[bi].add(jnp.where(h, r, 0.0)))(
+                Z, b_index, hit, rise
+            )
+
+        def infusion_input(mid):
+            on = (i_start <= mid) & (mid < i_stop)  # (U, M)
+            u = jax.vmap(lambda ii, o, r: jnp.zeros(n).at[ii].add(jnp.where(o, r, 0.0)))(
+                i_index, on, i_rise
+            )
+            return u, on
+
+        def rates(t, Z, u):
+            return jax.vmap(lambda z, th, uu: rhs(t, z, th, geom) + uu)(Z, theta, u)
+
+        def next_boundary(a):
+            cands = jnp.concatenate([b_time.reshape(-1), i_start.reshape(-1),
+                                     i_stop.reshape(-1), jnp.array([T1])])  # fmt: skip
+            later = jnp.where(cands > a, cands, jnp.inf)
+            return jnp.min(later)
+
+        def jumps(at, Z_before, Z_after, S_before, u_before, u_after):
+            """The derivatives just after the boundary at ``at``: each unit's doses there
+            (their amounts' derivatives), and the jump of its right-hand side (before minus
+            after) times how fast the boundary moves for it (the derivative of the first of
+            its own dose or infusion times at ``at``; 0 for a unit with none there)."""
+            hit = b_time == at  # (U, k)
+            cands = jnp.concatenate([b_time, i_start, i_stop], axis=1)  # (U, C)
+            cdot = jnp.concatenate([b_time_dot, i_start_dot, i_stop_dot], axis=2)  # (U, P, C)
+            is_at = cands == at
+            first = jnp.argmax(is_at, axis=1)
+            at_dot = jnp.take_along_axis(cdot, first[:, None, None], axis=2)[..., 0]
+            at_dot = jnp.where(jnp.any(is_at, axis=1)[:, None], at_dot, 0.0)  # (U, P)
+            f_before = rates(at, Z_before, u_before)
+            f_after = rates(at, Z_after, u_after)
+
+            def one(s_u, at_d, h, r_d, bi, fb, fa):  # one unit: s_u (P, n)
+                s_u = jax.vmap(lambda s_, rd: s_.at[bi].add(jnp.where(h, rd, 0.0)))(s_u, r_d)
+                return s_u + (fb - fa)[None, :] * at_d[:, None]
+
+            S = jnp.swapaxes(S_before, 0, 1)  # (U, P, n)
+            S = jax.vmap(one)(S, at_dot, hit, rise_dot, b_index, f_before, f_after)
+            return jnp.swapaxes(S, 0, 1)  # (P, U, n)
+
+        def seg_cond(s):
+            return (s["a"] < T1) & (s["status"] == OK)
+
+        def seg_body(s):
+            a = s["a"]
+            b = jnp.minimum(next_boundary(a), T1)
+            mid = 0.5 * (a + b)
+            u, on = infusion_input(mid)
+
+            def fun(t, zf):
+                return rates(t, zf.reshape(U, n), u).reshape(-1)
+
+            def jac(t, zf):
+                return jax.vmap(lambda z, th: jac_one(t, z, th))(zf.reshape(U, n), theta)
+
+            sens = None
+            if P:
+                u_dot = jax.vmap(  # (U, P, n)
+                    lambda ii, o, rd: jax.vmap(
+                        lambda r: jnp.zeros(n).at[ii].add(jnp.where(o, r, 0.0))
+                    )(rd)
+                )(i_index, on, i_rise_dot)
+
+                def fun_s(t, zf, sf):
+                    Z = zf.reshape(U, n)
+                    S = sf.reshape(P, U, n)
+
+                    def unit(z, th, uu, s_u, thd, ud):  # s_u (P, n)
+                        return jax.vmap(
+                            lambda s_, td, du: jax.jvp(
+                                lambda z_, th_, u_: rhs(t, z_, th_, geom) + u_,
+                                (z, th, uu), (s_, td, du),
+                            )[1]
+                        )(s_u, thd, ud)  # fmt: skip
+
+                    out = jax.vmap(unit)(Z, theta, u, jnp.swapaxes(S, 0, 1), theta_dot, u_dot)
+                    return jnp.swapaxes(out, 0, 1).reshape(-1)
+
+                sens = (fun_s, s["zs"].reshape(-1))
+
+            r = bdf(
+                fun, jac, a, b, s["z"].reshape(-1), t_out,
+                rtol=rtol, atol=atol.reshape(-1), max_step=max_step, max_steps=max_steps,
+                ys=s["ys"], i_out=s["i_out"], out_before=b,
+                sens=sens, sens_out=bool(P), linear=linear, units=U,
+            )  # fmt: skip
+            ok = r.status == OK
+            Z_end = r.y.reshape(U, n)
+            Z_ok = apply_doses(Z_end, b)
+            out = {
+                "a": jnp.where(ok, b, r.t),
+                "z": jnp.where(ok, Z_ok, Z_end),
+                "ys": r.ys,
+                "i_out": r.i_out,
+                "status": r.status,
+                "n_steps": s["n_steps"] + r.n_steps,
+                "n_rejected": s["n_rejected"] + r.n_rejected,
+                "nfev": s["nfev"] + r.nfev,
+                "njev": s["njev"] + r.njev,
+                "nlu": s["nlu"] + r.nlu,
+                "segments": s["segments"] + 1,
+                "most_steps": jnp.maximum(s["most_steps"], r.n_steps),
+            }
+            if P:
+                S_end = r.s.reshape(P, U, n)
+                u_next, _ = infusion_input(0.5 * (b + jnp.minimum(next_boundary(b), T1)))
+                out["zs"] = jnp.where(ok, jumps(b, Z_end, Z_ok, S_end, u, u_next), S_end)
+            return out
+
+        zero = jnp.int64(0)
+        Z_start = apply_doses(y0, t0)
+        state = {
+            "a": jnp.asarray(t0, dtype=jnp.float64),
+            "z": Z_start,
+            "ys": jnp.full((t_out.shape[0], U * n * (1 + P)), jnp.nan),
+            "i_out": zero,
+            "status": jnp.select(
+                [jnp.any(bad_arrival), bad_regimen], [BAD_ARRIVAL, BAD_REGIMEN], OK
+            ).astype(jnp.int64),
+            "n_steps": zero,
+            "n_rejected": zero,
+            "nfev": zero,
+            "njev": zero,
+            "nlu": zero,
+            "segments": zero,
+            "most_steps": zero,
+        }
+        if P:  # the start: the initial values' derivatives, then any doses at t0
+            S0 = jnp.swapaxes(y0_dot, 0, 1)  # (P, U, n)
+            u0, _ = infusion_input(0.5 * (t0 + jnp.minimum(next_boundary(t0), T1)))
+            state["zs"] = jumps(t0, y0, Z_start, S0, u0, u0)
+        s = jax.lax.while_loop(seg_cond, seg_body, state)
+        last = (t_out == T1)[:, None] & (jnp.arange(t_out.shape[0]) >= s["i_out"])[:, None]
+        z_last = s["z"].reshape(-1)
+        if P:
+            z_last = jnp.concatenate([z_last, s["zs"].reshape(-1)])
+        ys = jnp.where(last, z_last, s["ys"])
+        return {**s, "ys": ys, "t": s["a"]}
 
     jitted = jax.jit(program)
     cm._lazy[key] = jitted

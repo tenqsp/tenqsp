@@ -82,11 +82,12 @@ def test_values_and_derivatives_against_the_closed_form(sim, mode):
 
 @pytest.mark.parametrize("mode", ["forward", "reverse", False])
 def test_padding_changes_nothing(sim, mode):
-    """A scenario padded to a larger one's size gives exactly what it gives unpadded."""
+    """A scenario padded to a larger one's size gives exactly what it gives unpadded (each
+    scenario with its own steps: batch="vmap"; stacked, see test_stacked_batches)."""
     s0, s1, s2 = scenarios()
-    alone = sim.function([s0, s0], wrt=["ka", "CL"], derivatives=mode)
+    alone = sim.function([s0, s0], wrt=["ka", "CL"], derivatives=mode, batch="vmap")
     for big in (s1, s2):
-        padded = sim.function([s0, big], wrt=["ka", "CL"], derivatives=mode)
+        padded = sim.function([s0, big], wrt=["ka", "CL"], derivatives=mode, batch="vmap")
         np.testing.assert_array_equal(
             padded(padded.x0)["conc"][0, :5], alone(alone.x0)["conc"][0, :5]
         )
@@ -159,7 +160,7 @@ def test_dose_numbers_in_wrt(sim):
 
 
 def test_status_per_scenario(sim):
-    fs = sim.function(scenarios(), wrt=["dose 1 time"])
+    fs = sim.function(scenarios(), wrt=["dose 1 time"], batch="vmap")
     X = jnp.asarray(fs.x0).at[1, 0].set(-5.0)  # scenario 2's dose before the start
     assert fs.status(X) == ("ok", fs.status(X)[1], "ok")
     assert "before the start" in fs.status(X)[1]

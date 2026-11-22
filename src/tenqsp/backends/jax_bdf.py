@@ -175,7 +175,7 @@ DENSE = LinearSolver(
 SENS_FLOOR = 1e-12
 
 
-def _sens_scale(atol_s, rtol, s, p):
+def _sens_scale(atol_s, rtol, s, p, units=1):
     """The error scale of the carried derivative ``s`` (``p`` directions side by side):
     ``atol + rtol |s| + SENS_FLOOR max|s|`` (the largest entry of the same direction), so
     each derivative is resolved to ``rtol`` of its own size, as CVODES does. The floor
@@ -186,13 +186,31 @@ def _sens_scale(atol_s, rtol, s, p):
     worse. Without the floor, a small ``atol`` failed every step. (0.8.1 also added
     ``rtol |y|``, the state's own accuracy; a derivative much smaller than its state was then
     resolved only to that, which spoiled standard errors: removed in 0.8.2.)"""
-    big = jnp.repeat(jnp.max(jnp.abs(s.reshape(p, -1)), axis=1), s.shape[0] // p)
+    # the largest entry of each direction (of each unit's part of it, in a stacked batch)
+    a = jnp.abs(s.reshape(p, units, -1))
+    big = jnp.broadcast_to(jnp.max(a, axis=2, keepdims=True), a.shape).reshape(-1)
     return atol_s + rtol * jnp.abs(s) + SENS_FLOOR * big
 
 
 def _rms(x):
     """scipy's ``norm``: the root mean square."""
     return jnp.linalg.norm(x) / np.sqrt(x.size)
+
+
+def _unit_rms(units: int, n: int):
+    """The norm of a stack of ``units`` systems of ``n`` states each (stacked batches, ADR
+    0010): the largest of the units' root mean squares, so no unit is solved less accurately
+    than it would be alone. A vector of ``k x units x n`` entries (the state: k = 1;
+    derivatives carried along p directions, direction by direction: k = p) is read as
+    (k, units, n)."""
+    if units == 1:
+        return _rms
+
+    def norm(x):
+        x = x.reshape(-1, units, n)
+        return jnp.sqrt(jnp.max(jnp.mean(x * x, axis=(0, 2))))
+
+    return norm
 
 
 def _R(order, factor):
@@ -326,16 +344,16 @@ class _Carry(NamedTuple):
     s_event: jax.Array
 
 
-def first_step(fun, t0, t1, y0, f0, rtol, atol, max_step, floor=FIRST_STEP_FLOOR):
+def first_step(fun, t0, t1, y0, f0, rtol, atol, max_step, floor=FIRST_STEP_FLOOR, norm=_rms):
     """Starting step: scipy's rule (``select_initial_step``, order 1 for BDF), floored at
     ``floor * (t1 - t0)`` as the scipy backend does (V14)."""
     span = t1 - t0
     scale = atol + jnp.abs(y0) * rtol
-    d0, d1 = _rms(y0 / scale), _rms(f0 / scale)
+    d0, d1 = norm(y0 / scale), norm(f0 / scale)
     h0 = jnp.where((d0 < 1e-5) | (d1 < 1e-5), 1e-6, 0.01 * d0 / d1)
     h0 = jnp.minimum(h0, span)
     f1 = fun(t0 + h0, y0 + h0 * f0)
-    d2 = _rms((f1 - f0) / scale) / h0
+    d2 = norm((f1 - f0) / scale) / h0
     h1 = jnp.where(
         (d1 <= 1e-15) & (d2 <= 1e-15),
         jnp.maximum(1e-6, h0 * 1e-3),
@@ -345,7 +363,7 @@ def first_step(fun, t0, t1, y0, f0, rtol, atol, max_step, floor=FIRST_STEP_FLOOR
     return jnp.minimum(jnp.minimum(jnp.maximum(h, floor * span), span), max_step)
 
 
-def _newton(fun, t_new, y_predict, c, psi, lu_piv, scale, tol, solve=jsl.lu_solve):
+def _newton(fun, t_new, y_predict, c, psi, lu_piv, scale, tol, solve=jsl.lu_solve, norm=_rms):
     """scipy's ``solve_bdf_system``: (converged, iterations, y, d, function evaluations)."""
     n = y_predict.shape[0]
 
@@ -358,7 +376,7 @@ def _newton(fun, t_new, y_predict, c, psi, lu_piv, scale, tol, solve=jsl.lu_solv
         f = fun(t_new, y)
         finite = jnp.all(jnp.isfinite(f))
         dy = solve(lu_piv, c * f - psi - d)
-        dy_norm = _rms(dy / scale)
+        dy_norm = norm(dy / scale)
         has_rate = old >= 0
         rate = jnp.where(has_rate, dy_norm / jnp.where(has_rate, old, 1.0), 0.0)
         left = (NEWTON_MAXITER - k).astype(jnp.float64)
@@ -399,6 +417,7 @@ def bdf(
     sens_out: bool = False,
     linear: LinearSolver = DENSE,
     skip=False,
+    units: int = 1,
 ) -> Result:
     """Integrate ``y' = fun(t, y)`` from ``t0`` to ``t1`` with BDF, returning the state at the
     increasing times ``t_out`` (within [t0, t1]; entries past t1, e.g. +inf padding, stay
@@ -432,7 +451,12 @@ def bdf(
     after the state (``ys`` then has ``n + p x n`` columns).
 
     ``skip``: take no step (a member of a batch whose own loop is done: nothing written to
-    ``record``, see ``while_running``)."""
+    ``record``, see ``while_running``).
+
+    ``units``: the state is a stack of that many systems of equal size, side by side (a
+    stacked batch, ADR 0010; derivatives direction by direction, each with every unit's
+    part): every error norm is the largest unit's (``_unit_rms``), so the shared steps are
+    those the least easy unit needs."""
     y0 = jnp.asarray(y0, dtype=jnp.float64)
     n = y0.shape[0]
     t0 = jnp.asarray(t0, dtype=jnp.float64)
@@ -445,8 +469,9 @@ def bdf(
     alpha = jnp.asarray(_ALPHA)
     error_const = jnp.asarray(_ERROR_CONST)
 
+    norm = _unit_rms(units, n // units)
     f0 = fun(t0, y0)
-    h_abs = first_step(fun, t0, t1, y0, f0, rtol, atol, max_step) if h0 is None else h0
+    h_abs = first_step(fun, t0, t1, y0, f0, rtol, atol, max_step, norm=norm) if h0 is None else h0
     h_abs = jnp.asarray(h_abs, dtype=jnp.float64)
     D = jnp.zeros((MAX_ORDER + 3, n)).at[0].set(y0).at[1].set(f0 * h_abs)
     J = jac(t0, y0)
@@ -531,12 +556,12 @@ def bdf(
             F = linear.refactor(c.F, c.J, cc, need_lu)
         nlu = c.nlu + jnp.where(lu_valid, 0, 1)
         converged, n_iter, y_new, d = _newton(
-            fun, t_new, y_predict, cc, psi, F, scale, newton_tol, linear.solve
+            fun, t_new, y_predict, cc, psi, F, scale, newton_tol, linear.solve, norm
         )
         nfev = c.nfev + n_iter
         if carry_s:  # the derivative's corrector, with the same matrix (module docstring)
             s_predict, psi_s = predict(Ds, order)
-            scale_s = _sens_scale(atol_s, rtol, s_predict, p)
+            scale_s = _sens_scale(atol_s, rtol, s_predict, p, units)
             conv_s, n_iter_s, s_new, ds = when(
                 converged,
                 lambda: _newton(
@@ -549,6 +574,7 @@ def bdf(
                     scale_s,
                     newton_tol,
                     solve_s,
+                    norm,
                 ),
                 lambda: (jnp.bool_(False), jnp.int64(0), s_predict, jnp.zeros_like(s_predict)),
             )
@@ -564,10 +590,10 @@ def bdf(
         # ---- converged: the error test
         safety = 0.9 * (2 * NEWTON_MAXITER + 1) / (2 * NEWTON_MAXITER + n_iter)
         scale_new = atol + rtol * jnp.abs(y_new)
-        error_norm = _rms(error_const[order] * d / scale_new)
+        error_norm = norm(error_const[order] * d / scale_new)
         if carry_s:
-            scale_s_new = _sens_scale(atol_s, rtol, s_new, p)
-            error_norm = jnp.maximum(error_norm, _rms(error_const[order] * ds / scale_s_new))
+            scale_s_new = _sens_scale(atol_s, rtol, s_new, p, units)
+            error_norm = jnp.maximum(error_norm, norm(error_const[order] * ds / scale_s_new))
         reject = converged & (error_norm > 1)
         accept = converged & ~reject
         reject_factor = jnp.maximum(
@@ -588,25 +614,25 @@ def bdf(
         # order and step size for the next step, once order + 1 equal steps have been taken
         choose = n_eq_acc >= order + 1
         err_m = jnp.where(
-            order > 1, _rms(error_const[order - 1] * Dacc[order] / scale_new), jnp.inf
+            order > 1, norm(error_const[order - 1] * Dacc[order] / scale_new), jnp.inf
         )
         err_p = jnp.where(
             order < MAX_ORDER,
-            _rms(error_const[jnp.minimum(order + 1, MAX_ORDER)] * Dacc[order + 2] / scale_new),
+            norm(error_const[jnp.minimum(order + 1, MAX_ORDER)] * Dacc[order + 2] / scale_new),
             jnp.inf,
         )
         if carry_s:
             err_m = jnp.maximum(
                 err_m,
                 jnp.where(
-                    order > 1, _rms(error_const[order - 1] * Dsacc[order] / scale_s_new), jnp.inf
+                    order > 1, norm(error_const[order - 1] * Dsacc[order] / scale_s_new), jnp.inf
                 ),
             )
             err_p = jnp.maximum(
                 err_p,
                 jnp.where(
                     order < MAX_ORDER,
-                    _rms(
+                    norm(
                         error_const[jnp.minimum(order + 1, MAX_ORDER)]
                         * Dsacc[order + 2]
                         / scale_s_new

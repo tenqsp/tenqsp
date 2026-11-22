@@ -5,6 +5,36 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Added
+- **Stacked batches** (ADR 0010): `sim.function([sc1, sc2, ...], wrt=..., batch="stacked")`
+  runs the scenarios as one system, with one sequence of steps chosen for the least easy of
+  them and the iteration matrix as one block per scenario: for a small model and similar
+  scenarios several times faster than one `jax.vmap` call (Friberg's myelosuppression model,
+  20 subjects with 4 sensitivities: 13 ms against 91 ms), slower where the scenarios differ
+  much (a ladder of doses over 9 decades: 2.2 times the steps, 2 times the time).
+  `batch="vmap"` stays the default; `fs.batch` says which. Stacked runs need derivatives
+  `"forward"` or `False`, no events or conditions on time, the dense tier and one start time;
+  a stacked run that fails gives NaN for every scenario of the call (`fs.status(X)` says
+  which failed).
+- **A native CPU backend** (ADR 0011): `sim.function([sc1, sc2, ...], wrt=...,
+  backend="native")` solves with TenQSP's BDF compiled by numba (`pip install
+  "tenqsp[native]"`): the model's right-hand side, Jacobian and derivatives are translated
+  from its JAX programs, the solver is a port of the JAX one (the same steps up to round-off),
+  and the scenarios of a batch run in parallel on the cores. Several times to 15 times faster
+  per run on the CPU (an oral PK batch: 45 ms against 4 ms; a 118-state model with 6
+  scenarios and 5 derivatives: 4.8 s against 0.32 s). The first build of a model compiles it
+  (cached on disk, in `~/.cache/tenqsp/native` or `TENQSP_NATIVE_CACHE`). For forward or no
+  derivatives and models without events or conditions on time; refused, with the reason,
+  elsewhere.
+- **Call-time step limit and step counts**: `fs(X, max_steps=...)` (and `f(x, ...)`,
+  `status`, `steps`) limits that call's steps, like `rtol` and `atol`, without a new compile;
+  `with_steps=True` returns the steps of the same run with the outputs, also inside
+  `jax.jit`.
+- **`sim.function([...], check=False)`**: no run of the scenarios when the list is built. By
+  default one call of the build checks that each scenario runs (its compile then serves the
+  later calls); before, each scenario ran through a program of its own, compiled separately
+  (with forward derivatives this check no longer costs a compile per scenario).
+
 ## [0.8.3] — 2026-11-15
 A bug-fix release. The first fix can change results: see `tq.known_issues()` on older versions.
 

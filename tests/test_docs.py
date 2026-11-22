@@ -61,14 +61,18 @@ def is_model(code: str) -> bool:
 SCIPY_PAGES = {"guide/troubleshooting.md"}
 
 
+def page_marks(p):
+    marks = [pytest.mark.scipy_backend] if str(p.relative_to(DOCS)) in SCIPY_PAGES else []
+    if 'backend="native"' in p.read_text(encoding="utf-8"):
+        # a first native run compiles its solver with numba: tens of seconds here, 2-4x that
+        # on GitHub's runners, past the 120 s that catches a hang
+        marks.append(pytest.mark.timeout(600))
+    return marks
+
+
 @pytest.mark.parametrize(
     "page",
-    [
-        pytest.param(p, marks=pytest.mark.scipy_backend)
-        if str(p.relative_to(DOCS)) in SCIPY_PAGES
-        else p
-        for p in PAGES
-    ],
+    [pytest.param(p, marks=page_marks(p)) for p in PAGES],
     ids=lambda p: str(p.relative_to(DOCS)),
 )
 def test_page_examples_run(page, tmp_path, monkeypatch):
