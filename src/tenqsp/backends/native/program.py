@@ -37,7 +37,7 @@ __all__ = ["available", "cache_dir", "native_sens_program", "unsupported"]
 _TEMPLATE = Path(__file__).with_name("bdf_template.py")
 _LOCK = threading.Lock()
 _MODULES: dict[str, object] = {}
-VERSION = 1  # of the generated modules: a change of the template or translator bumps it
+VERSION = 2  # of the generated modules (2: numpy's error model, inf and NaN as in JAX)
 
 
 def cache_dir() -> Path:
@@ -94,6 +94,7 @@ def _key(cm, p: int) -> str:
     blob.update(cm.ir.structure_hash().encode())
     blob.update(_TEMPLATE.read_bytes())
     blob.update(Path(translate.__file__).read_bytes())
+    blob.update(Path(__file__).read_bytes())  # writes the module (its decorators)
     blob.update(jax.__version__.encode())
     return blob.hexdigest()[:24]
 
@@ -150,7 +151,7 @@ def _write(cm, p: int, path: Path, data: Path) -> None:
         ("sens", sens, (0.0, z, th, S, TD, geom), (5,)),
     ):
         src, cs = source(fn, *ex, static=static, name=name, prefix=f"{name.upper()}_C")
-        parts.append("@njit(cache=True)\n" + src)
+        parts.append('@njit(cache=True, error_model="numpy")\n' + src)
         consts.update(cs)
     np.savez(data, **consts)
     head = (

@@ -158,3 +158,27 @@ def test_nested_batches():
     yj = jax.vmap(lambda X: fj(X)["conc"])(Xs)
     yn = jax.vmap(lambda X: fn(X)["conc"])(Xs)
     np.testing.assert_allclose(np.asarray(yn), np.asarray(yj), rtol=1e-8)
+
+
+def test_invalid_values_give_nan_as_in_jax():
+    """A division by zero, the log or square root of a negative number and 0 to a negative
+    power give inf or NaN, as in JAX, not an error that ends the batch (an optimizer's trial
+    point can be anywhere): that scenario is NaN, the others are untouched."""
+    text = """model invalid
+param ka=1.2, CL=4, V=30, a=1, b=1, c=1
+d_t(depot) = -ka*depot
+d_t(centr) = ka*depot - CL/V*centr - 1e-6*(log(a) + sqrt(b) + c**(-1))*centr
+observable conc = centr/V
+"""
+    sim = tq.Model.from_text(text).simulator(outputs=["conc"])
+    reg = tq.bolus("depot", 100.0, times=[0.0])
+    scs = [tq.Scenario(regimen=reg, times=(1.0, 2.0))] * 5
+    fj = sim.function(scs, wrt=["V", "a", "b", "c"])
+    fn = sim.function(scs, wrt=["V", "a", "b", "c"], backend="native")
+    X = jnp.asarray(fj.x0)
+    X = X.at[1, 0].set(0.0).at[2, 1].set(-1.0).at[3, 2].set(-1.0).at[4, 3].set(0.0)
+    yj, yn = np.asarray(fj(X)["conc"]), np.asarray(fn(X)["conc"])
+    assert np.isnan(yj[1:]).all() and np.isnan(yn[1:]).all()
+    np.testing.assert_allclose(yn[0], yj[0], rtol=1e-8)
+    Jn = np.asarray(jax.jacfwd(lambda X_: fn(X_)["conc"])(X))
+    assert np.isfinite(Jn[0]).all()

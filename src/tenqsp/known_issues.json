@@ -3,6 +3,16 @@
   "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
   "issues": [
     {
+      "id": "native-zero-division-error",
+      "title": "The native backend stopped with ZeroDivisionError where JAX gives inf or NaN",
+      "area": ["solver"],
+      "introduced": "0.9.0",
+      "fixed_in": "0.9.1",
+      "changes_results": false,
+      "details": "With backend=\"native\", a run at values where the model divides by zero (a volume of 0, 0 to a negative power, a parameter that overflows to inf) raised ZeroDivisionError and ended the whole call, where the JAX backend gives NaN for that scenario. An optimizer's trial point can be such a value: in tenqsp-fit 0.3.0 a fit could stop with this error. Results that were computed were not affected.",
+      "workaround": "Use the JAX backend (sim.function(..., backend=\"jax\"); in tenqsp-fit, options backend=jax), or bounds that keep the parameters away from such values."
+    },
+    {
       "id": "extinct-group-regrows-from-round-off",
       "title": "An extinct population could come back from solver round-off",
       "area": ["extinction"],

@@ -178,7 +178,7 @@ def _elementwise(e, name, args, ins, out, w: _Writer) -> str | None:
     if name in _UNARY:
         return "(" + _UNARY[name].format(c[0], c[0]) + ")"
     if name == "integer_pow":
-        return f"(({c[0]}) ** {int(e.params['y'])})"
+        return _ipow(c[0], e.params["y"])
     if name == "select_n" and len(c) == 3:
         if not shape and not ins[0].shape:
             return f"({c[2]} if {c[0]} else {c[1]})"
@@ -217,7 +217,7 @@ def _emit(e, name, args, w: _Writer):
     elif name in _UNARY:
         w.emit(f"{r} = " + _UNARY[name].format(c[0], c[0]))
     elif name == "integer_pow":
-        w.emit(f"{r} = ({c[0]}) ** {int(e.params['y'])}")
+        w.emit(f"{r} = {_ipow(c[0], e.params['y'])}")
     elif name == "convert_element_type":
         dt = _dtype(out)
         if not shape and dt == "np.float64":
@@ -556,6 +556,14 @@ def _sym(value) -> np.ndarray:
     return out
 
 
+def _ipow(x: str, y) -> str:
+    """``x ** y`` for an integer ``y``; a negative one as ``1.0 / x ** -y``, because numba's
+    integer power raises ZeroDivisionError at 0 (whatever the error model), where JAX gives
+    inf."""
+    y = int(y)
+    return f"(({x}) ** {y})" if y >= 0 else f"(1.0 / ({x}) ** {-y})"
+
+
 def _elem(name, params, args, out_aval, w: _S):
     """One elementwise operation on entries (numbers fold)."""
     if all(_is_num(a) for a in args):
@@ -601,7 +609,7 @@ def _elem(name, params, args, out_aval, w: _S):
     if name in _UNARY:
         return w.new(_UNARY[name].format(c[0], c[0]))
     if name == "integer_pow":
-        return w.new(f"{c[0]} ** {int(params['y'])}")
+        return w.new(_ipow(c[0], params["y"]))
     if name == "select_n":
         if len(c) != 3:
             raise NotTranslatable(f"select_n with {len(c) - 1} cases")
@@ -1129,7 +1137,7 @@ def _elem_text(name, params, c, out):
     if name in _UNARY:
         return "(" + _UNARY[name].format(c[0], c[0]) + ")"
     if name == "integer_pow":
-        return f"(({c[0]}) ** {int(params['y'])})"
+        return _ipow(c[0], params["y"])
     if name == "select_n":
         if len(c) != 3:
             raise NotTranslatable(f"select_n with {len(c) - 1} cases")
@@ -1229,4 +1237,4 @@ def translate(fn, *examples, static=(), name="f"):
     src, consts = source(fn, *examples, static=static, name=name)
     glb = {"np": np, **consts}
     exec(compile(src, f"<tenqsp native {name}>", "exec"), glb)  # noqa: S102 - our own source
-    return numba.njit(cache=False)(glb[name]), src
+    return numba.njit(cache=False, error_model="numpy")(glb[name]), src
