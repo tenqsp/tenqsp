@@ -5,6 +5,10 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-22
+Faster runs for fits: a native CPU backend, stacked batches and options per call. No results
+change: the native backend agrees with the JAX one to round-off.
+
 ### Added
 - **Stacked batches** (ADR 0010): `sim.function([sc1, sc2, ...], wrt=..., batch="stacked")`
   runs the scenarios as one system, with one sequence of steps chosen for the least easy of
