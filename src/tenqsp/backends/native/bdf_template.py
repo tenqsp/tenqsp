@@ -37,7 +37,7 @@ _ALPHA = (1 - _KAPPA) * _GAMMA
 _ERROR_CONST = _KAPPA * _GAMMA + 1.0 / np.arange(1, MAX_ORDER + 2)
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _rms(x):
     s = 0.0
     for v in x.ravel():
@@ -45,7 +45,7 @@ def _rms(x):
     return np.sqrt(s / max(x.size, 1))
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _lu_factor(A):
     n = A.shape[0]
     LU = A.copy()
@@ -77,7 +77,7 @@ def _lu_factor(A):
     return LU, piv
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _lu_solve(LU, piv, b):
     n = b.shape[0]
     x = np.empty(n)
@@ -96,7 +96,7 @@ def _lu_solve(LU, piv, b):
     return x
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _R_into(R, order, factor):
     """scipy's compute_R at full size, zero outside the (order + 1) block, into ``R``."""
     for j in range(MAX_ORDER + 1):
@@ -130,7 +130,7 @@ def _u_table():
 _U = _u_table()  # R(order, 1), one per order: a constant of the change_D product
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _change_D(D, order, factor, W):
     """scipy's change_D, in place (D: (MAX_ORDER + 3, m)); ``W``: workspace with ``R``,
     ``RU`` ((MAX_ORDER + 1)^2 each) and rows for the new top block."""
@@ -157,7 +157,7 @@ def _change_D(D, order, factor, W):
             D[i, j] = top[i, j]
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _predict(D, order, yp, psi):
     m = D.shape[1]
     a = _ALPHA[order]
@@ -171,7 +171,7 @@ def _predict(D, order, yp, psi):
         psi[j] = ps / a
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _update(D, d, order):
     m = D.shape[1]
     for j in range(m):
@@ -182,7 +182,7 @@ def _update(D, d, order):
             D[k, j] += D[k + 1, j]
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _dense_into(out, D, t, h, order, tau):
     m = D.shape[1]
     for i in range(m):
@@ -194,7 +194,7 @@ def _dense_into(out, D, t, h, order, tau):
             out[i] += D[j + 1, i] * p
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _rms_ratio(x, scale, c):
     """rms(c * x / scale), with no array made."""
     acc = 0.0
@@ -204,13 +204,13 @@ def _rms_ratio(x, scale, c):
     return np.sqrt(acc / max(x.size, 1))
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _state_scale(scale, atol, rtol, y):
     for i in range(y.size):
         scale[i] = atol[i] + rtol * abs(y[i])
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _sens_scale(scale, atol, rtol, s, P, n):
     for k in range(P):
         big = 0.0
@@ -222,19 +222,19 @@ def _sens_scale(scale, atol, rtol, s, P, n):
             scale[k * n + i] = atol[i] + rtol * abs(s[k * n + i]) + SENS_FLOOR * big
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _fun(t, z, th, u):
     return rhs(t, z, th)[0] + u  # noqa: F821 - the model's kernel (module docstring)
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _fun_s(t, z, th, s, TD, UD, P, n):
     S = s.reshape(P, n)
     out = sens(t, z, th, S, TD)[0] + UD  # noqa: F821 - the model's kernel
     return np.ascontiguousarray(out).ravel()
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _first_step(t0, t1, y0, f0, th, u, rtol, atol, max_step):
     span = t1 - t0
     scale = atol + np.abs(y0) * rtol
@@ -251,7 +251,7 @@ def _first_step(t0, t1, y0, f0, th, u, rtol, atol, max_step):
     return min(min(max(h, FIRST_STEP_FLOOR * span), span), max_step)
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _lu_solve_into(LU, piv, b, x, off, n):
     """x[off:off+n] = solve(LU, b[off:off+n])."""
     for i in range(n):
@@ -268,7 +268,7 @@ def _lu_solve_into(LU, piv, b, x, off, n):
         x[off + i] = acc / LU[i, i]
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _newton(t_new, yp, c, psi, LU, piv, scale, tol, th, u, y, d, rhs_buf, dy,
             sens_mode, z, TD, UD, P, n):  # fmt: skip
     """scipy's solve_bdf_system, in place: y (from yp) and d; the state (``sens_mode``
@@ -309,7 +309,7 @@ def _newton(t_new, yp, c, psi, LU, piv, scale, tol, th, u, y, d, rhs_buf, dy,
     return False, k
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _bdf(t0, t1, y0, s0, th, u, TD, UD, P, t_out, ys, ss, i_out, out_before, rtol, atol,
          max_step, max_steps):  # fmt: skip
     """One segment, as jax_bdf.bdf without events or record; writes rows of ``ys``/``ss``
@@ -485,7 +485,7 @@ def _bdf(t0, t1, y0, s0, th, u, TD, UD, P, t_out, ys, ss, i_out, out_before, rto
     return OK, i_out, y, s, steps
 
 
-@njit(cache=True, nogil=True)
+@njit(cache=True, nogil=True, error_model="numpy")
 def run_one(theta, theta_dot, y0, y0_dot, b_time, b_time_dot, b_index, rise, rise_dot,
             i_start, i_start_dot, i_stop, i_stop_dot, i_index, i_rise, i_rise_dot,
             t0, t1, t_out, rtol, atol, max_step, max_steps):  # fmt: skip
@@ -581,7 +581,7 @@ def run_one(theta, theta_dot, y0, y0_dot, b_time, b_time_dot, b_index, rise, ris
     return ys, ss.reshape(T, P, n), OK, most
 
 
-@njit(cache=True)
+@njit(cache=True, error_model="numpy")
 def _inputs_at(a, cands, i_start, i_stop, i_index, i_rise, i_rise_dot, P, n, t1):
     """The infusion input of the segment starting at ``a`` (constant on it), and its
     derivative along each direction."""

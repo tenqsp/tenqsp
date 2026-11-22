@@ -5,6 +5,13 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Fixed
+- **The native backend stopped with `ZeroDivisionError`** where the JAX backend gives inf or
+  NaN: at a volume of 0, 0 to a negative power or a parameter that overflows (an
+  optimizer's trial point can be any of these), the whole call ended. That scenario now
+  gives NaN, as with JAX, and the others of the call are untouched. Compiled modules of
+  0.9.0 are not reused (the cache key now covers the code that writes them).
+
 ## [0.9.0] — 2026-11-22
 Faster runs for fits: a native CPU backend, stacked batches and options per call. No results
 change: the native backend agrees with the JAX one to round-off.
