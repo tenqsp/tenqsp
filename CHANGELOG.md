@@ -5,6 +5,12 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+### Changed
+- **Fewer packages installed**: diffrax, lineax and equinox are no longer requirements;
+  TenQSP's own solvers replaced them and nothing imports them any more.
+- The install page lists the `[native]` extra (numba), and running `backend="native"`
+  without numba says to `pip install "tenqsp[native]"`.
+
 ## [0.9.1] — 2026-11-22
 A bug-fix release for the native backend; no results change.
 

@@ -16,8 +16,5 @@ def test_float64_enabled():
 
 
 def test_stack_importable():
-    import diffrax  # noqa: F401
-    import equinox  # noqa: F401
-    import lineax  # noqa: F401
     import scipy.integrate  # noqa: F401
     import sympy  # noqa: F401
