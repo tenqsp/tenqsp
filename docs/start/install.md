@@ -6,11 +6,19 @@ TenQSP needs Python 3.12 or later. It runs on Linux, macOS and Windows.
 pip install tenqsp                 # the library
 pip install "tenqsp[plot]"         # with plots (matplotlib)
 pip install "tenqsp[xarray]"       # with xarray output
-pip install "tenqsp[plot,xarray]"  # both
+pip install "tenqsp[native]"       # with the native CPU backend (numba)
+pip install "tenqsp[plot,xarray,native]"  # all three
 ```
 
 Keep the quotes (zsh, the default shell on macOS, reads the brackets otherwise) and leave no
-space after the comma.
+space after the comma. `pip install -U ...` upgrades an installed TenQSP to the newest
+version.
+
+The native backend (`sim.function([...], backend="native")`, see
+[the native backend](../guide/gradients.md)) runs a list of scenarios on TenQSP's solver
+compiled by numba, several times faster on the CPU than JAX; without numba installed it says
+so. To fit models, install [tenqsp-fit](https://tenqsp.github.io/tenqsp-fit/) instead:
+`pip install tenqsp-fit` brings TenQSP with the native backend.
 
 To work on TenQSP itself, from a clone of the repository:
 
@@ -40,7 +48,8 @@ print(sol["A"][-1])                # exp(-1) = 0.3679
 
 TenQSP is built on [JAX](https://jax.readthedocs.io) (arrays, compilation, derivatives),
 [SciPy](https://scipy.org) (the default solver and sparse linear algebra) and
-[SymPy](https://www.sympy.org) (reading formulas). Importing TenQSP switches JAX to 64-bit
+[SymPy](https://www.sympy.org) (reading formulas); the native backend adds
+[numba](https://numba.pydata.org). Importing TenQSP switches JAX to 64-bit
 floating point, which every model needs.
 
 One solve is CPU work: the scipy solver, and linear algebra too small for a GPU to speed up.

@@ -67,7 +67,7 @@ def unsupported(cm, derivatives) -> str | None:
     from tenqsp.backends import jax_backend as jb
 
     if not available():
-        return "numba is not installed (pip install numba)"
+        return 'numba is not installed (pip install "tenqsp[native]")'
     if derivatives == "reverse":
         return "reverse derivatives (the native backend carries forward sensitivities)"
     if cm.extinction_groups or cm.switch_events:

@@ -57,7 +57,8 @@ pip install tenqsp
 ```
 
 TenQSP needs Python 3.12 or later. For plots add `tenqsp[plot]`; for labelled array output,
-`tenqsp[xarray]`.
+`tenqsp[xarray]`; for the native CPU backend (numba), `tenqsp[native]`. To fit models,
+`pip install tenqsp-fit`, which brings TenQSP with the native backend.
 
 ## Documentation
 
