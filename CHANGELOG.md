@@ -5,6 +5,9 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-22
+A bug-fix release for the native backend; no results change.
+
 ### Fixed
 - **The native backend stopped with `ZeroDivisionError`** where the JAX backend gives inf or
   NaN: at a volume of 0, 0 to a negative power or a parameter that overflows (an
