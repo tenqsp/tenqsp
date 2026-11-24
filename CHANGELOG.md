@@ -11,6 +11,21 @@ versioning; `0.x` releases may change the API.
 - The install page lists the `[native]` extra (numba), and running `backend="native"`
   without numba says to `pip install "tenqsp[native]"`.
 
+### Fixed
+Three places where transport could take mass from an empty cell and so make a field negative.
+Results change only in the cases named; everywhere else they are the same to the last digit.
+- **`sharp` on a nonuniform grid**: a cell wider than its neighbour could get a face value
+  below the neighbour's and, next to an empty cell, a negative one. The slope is now capped
+  so that face values stay between the neighbouring averages (on a uniform grid the van Leer
+  slope never reaches the cap).
+- **`sharp` at a Robin end, or an inflow end with diffusion**: the end cell's slope comes
+  from the two nearest interior gradients, so an empty end cell below a rising field sent
+  mass on downstream. Its slope now cannot take the end face below zero.
+- **A Robin end with flow leaving through it**: the outflow carried the boundary value, more
+  than an empty edge cell holds once the flow outruns diffusion across the half cell (a cell
+  Péclet number |v| × width / D above 2). Above that, the part of the outflow beyond what
+  diffusion carries takes the edge cell's own value; at 2 or less nothing changes.
+
 ## [0.9.1] — 2026-11-22
 A bug-fix release for the native backend; no results change.
 

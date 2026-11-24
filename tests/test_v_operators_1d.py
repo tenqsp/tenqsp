@@ -124,6 +124,84 @@ def test_sharp_scheme_creates_no_new_extrema():
     assert float(jnp.min(jnp.where(u == 0.0, du, 0.0))) >= -1e-12
 
 
+@pytest.mark.parametrize("one_sided", [(False, False), (True, True)])
+def test_sharp_scheme_stays_nonnegative_on_nonuniform_grids(one_sided):
+    """Nothing leaves an empty cell, on grids whose cells are wider than their neighbours.
+
+    Cell widths alternate 1 and 4: a wide cell next to an empty narrow one is where an
+    unlimited van Leer face value would turn negative. Closed ends, so each cell changes only
+    through the interior faces; both velocity signs.
+    """
+    ax = ContinuousAxis("x", np.cumsum([0.0] + [1.0, 4.0] * 8))
+    rng = np.random.default_rng(7)
+    for _ in range(50):
+        u = rng.uniform(0, 5, ax.n) * (rng.uniform(size=ax.n) < 0.6)  # about 40% empty
+        u = jnp.asarray(u)
+        v_int = jnp.asarray(rng.normal(size=ax.n - 1))
+        F_int = advective_flux_interior(
+            u,
+            v_int,
+            dim=0,
+            centers=ax.centers,
+            faces=ax.faces,
+            scheme="sharp",
+            one_sided=one_sided,
+        )
+        zero = jnp.asarray(0.0)  # closed ends
+        du = divergence(assemble_faces(zero, F_int, zero, dim=0), ax.widths, dim=0)
+        assert float(jnp.min(jnp.where(u == 0.0, du, 0.0))) >= -1e-12
+
+
+def test_sharp_one_sided_end_sends_nothing_from_an_empty_end_cell():
+    """At an end whose slope comes from the two nearest interior gradients (a Robin end, or
+    an inflow with diffusion), an empty end cell below a rising field must not send anything
+    downstream: its slope cannot take the end face below zero."""
+    ax = ContinuousAxis.uniform("x", 0.0, 1.0, 10)
+    u = jnp.asarray(np.r_[0.0, np.arange(1.0, 10.0)])  # empty first cell, rising after it
+    for v, u_ in ((1.0, u), (-1.0, u[::-1])):  # flow away from the empty end
+        F_int = advective_flux_interior(
+            u_,
+            jnp.full(ax.n - 1, v),
+            dim=0,
+            centers=ax.centers,
+            faces=ax.faces,
+            scheme="sharp",
+            one_sided=(True, True),
+        )
+        zero = jnp.asarray(0.0)  # closed ends
+        du = divergence(assemble_faces(zero, F_int, zero, dim=0), ax.widths, dim=0)
+        assert float(du[0] if v > 0 else du[-1]) >= 0.0
+
+
+def test_robin_outflow_takes_nothing_from_an_empty_edge_cell():
+    """Flow leaving through a Robin end faster than the half-cell diffuses (cell Péclet number
+    |v| width / D above 2) must not take more than the edge cell holds; below that, the
+    outflow carries the face value c_f."""
+    u = jnp.array([0.0, 1.0, 1.0])
+    D, w, h, out = 0.01, 0.1, 2.0, 3.0  # g = D / (w/2) = 0.2
+    for side, v_out in (("lower", -1.0), ("upper", 1.0)):  # v_out = 1 > g
+        F = robin_flux(
+            u[::-1] if side == "upper" else u,
+            h,
+            out,
+            dim=0,
+            side=side,
+            D_edge=D,
+            width_edge=w,
+            v_face=v_out,
+        )
+        into = F if side == "lower" else -F
+        assert float(into) >= 0.0
+    # at a cell Péclet number of 2 or less, the outflow carries c_f (second order), by hand
+    g, v = 0.2, 0.15
+    ue = 0.5
+    cf = (h * out + g * ue) / (h + g)
+    F = robin_flux(
+        jnp.array([ue, 1.0]), h, out, dim=0, side="lower", D_edge=D, width_edge=w, v_face=-v
+    )
+    assert float(F) == pytest.approx(-v * cf + h * (out - cf), rel=1e-14)
+
+
 def test_diffusion_harmonic_face_and_blocking():
     ax = ContinuousAxis.uniform("x", 0.0, 2.0, 2)  # two cells of width 1
     u = jnp.array([1.0, 0.0])

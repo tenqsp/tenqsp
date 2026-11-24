@@ -48,22 +48,42 @@ def _van_leer_slopes(u, centers, faces, lower_value, upper_value, one_sided=(Fal
     from the two nearest interior gradients, which keeps second order there. Otherwise the
     slope is zero (first order at that boundary).
     """
-    x = jnp.asarray(centers).reshape((-1,) + (1,) * (u.ndim - 1))
+    shape = (-1,) + (1,) * (u.ndim - 1)
+    centers, faces = jnp.asarray(centers), jnp.asarray(faces)  # traced inside a compiled model
+    x = centers.reshape(shape)
     g = (u[1:] - u[:-1]) / (x[1:] - x[:-1])  # gradient across each interior face
-    s_mid = _van_leer(g[:-1], g[1:])
+    # A cell's face values must stay between its neighbours' values, or an empty cell next to
+    # a full one gets a negative face value and a negative flux. With centres midway between
+    # faces that holds for the van Leer slope when the cell is no wider than its neighbours
+    # (always on a uniform grid); on a nonuniform grid the slope is capped so that it holds:
+    # |s| (centre to face) <= |gradient to the neighbour| (centre to centre).
+    to_lo = (centers - faces[:-1]).reshape(shape)  # centre to lower face
+    to_hi = (faces[1:] - centers).reshape(shape)  # centre to upper face
+    span = (centers[1:] - centers[:-1]).reshape(shape)  # centre to centre
+    cap_lo = jnp.abs(g) * (span / to_lo[1:])  # cells 1..n-1, from the lower neighbour
+    cap_hi = jnp.abs(g) * (span / to_hi[:-1])  # cells 0..n-2, from the upper neighbour
+
+    def capped(s, cap):
+        return jnp.sign(s) * jnp.minimum(jnp.abs(s), cap)
+
+    s_mid = capped(capped(_van_leer(g[:-1], g[1:]), cap_lo[:-1]), cap_hi[1:])
     n = u.shape[0]
     if lower_value is not None:
         g_lo = (u[0] - lower_value) / (centers[0] - faces[0])
-        s_lo = _van_leer(g_lo, g[0])[None]
+        s_lo = capped(_van_leer(g_lo, g[0]), cap_hi[0])[None]
     elif one_sided[0] and n >= 3:
-        s_lo = _van_leer(g[0], g[1])[None]
+        # no lower neighbour: the slope must not take the lower face value below zero, so an
+        # empty end cell sends nothing on (its outflow is zero, as for an interior cell)
+        s = capped(_van_leer(g[0], g[1]), cap_hi[0])
+        s_lo = jnp.where(s > 0, jnp.minimum(s, jnp.maximum(u[0], 0.0) / to_lo[0]), s)[None]
     else:
         s_lo = jnp.zeros_like(u[:1])
     if upper_value is not None:
         g_hi = (upper_value - u[-1]) / (faces[-1] - centers[-1])
-        s_hi = _van_leer(g[-1], g_hi)[None]
+        s_hi = capped(_van_leer(g[-1], g_hi), cap_lo[-1])[None]
     elif one_sided[1] and n >= 3:
-        s_hi = _van_leer(g[-2], g[-1])[None]
+        s = capped(_van_leer(g[-2], g[-1]), cap_lo[-1])
+        s_hi = jnp.where(s < 0, jnp.maximum(s, -jnp.maximum(u[-1], 0.0) / to_hi[-1]), s)[None]
     else:
         s_hi = jnp.zeros_like(u[:1])
     return jnp.concatenate([s_lo, s_mid, s_hi], axis=0)

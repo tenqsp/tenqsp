@@ -8,13 +8,13 @@
 #   absorbed there; what matters is when it leaves (gastric emptying), the main cause of the
 #   delay before absorption.
 # - **Small intestine**, a field over position along it, from 0 (the duodenum) to 1 (the
-#   ileocaecal valve). The contents travel along it in about 3.3 h (199 min; Yu & Amidon
-#   1996), and absorption is fastest near the start and slower further along.
+#   ileocaecal valve). The contents travel along it in about 3.3 h (199 min; Yu, Crison
+#   & Amidon 1996), and absorption is fastest near the start and slower further along.
 # - **Colon** and **body** as compartments.
 #
 # This is the structure of the continuous intestinal transit model in PK-Sim (Willmann et al.
 # 2003, 2004), built on the dispersion model of Ni, Ho, Fox, Leuenberger and Higuchi (1980);
-# the compartmental absorption and transit (CAT) model of Yu & Amidon (1996) is the same
+# the compartmental absorption and transit (CAT) model of Yu & Amidon (1999) is the same
 # intestine cut into 7 compartments.
 #
 # **Assumptions** of this version:

@@ -117,12 +117,15 @@ s_i = \begin{cases}
 $$
 
 The limited slope keeps every face value between the neighbouring cell averages, so no new
-peaks or negative values appear. Where the solution is smooth the scheme is second order: the
+peaks or negative values appear. (On a nonuniform grid that holds for a cell no wider than its
+neighbours; for a wider one the slope is capped so that it still holds.) Where the solution is smooth the scheme is second order: the
 error falls about four times when the cells are halved, and refining the grid converges to
 transport without spread. At peaks the slope is set to zero and the scheme drops to first
 order there, which is the price of staying positive. At an end where the inflowing value is
-known (an inflow, a held value) the end cell uses it for its slope; elsewhere the end cells
-are first order.
+known (an inflow, a held value) the end cell uses it for its slope. Where the end value is
+not known but flow may enter (an inflow with diffusion, a Robin end), the end cell's slope is
+limited from the two nearest interior gradients and kept from taking the end face below zero,
+so an empty end cell sends nothing on. Elsewhere the end cells are first order.
 
 What it buys: fronts keep their shape, a latent period stays a latent period. What it costs:
 the solver now resolves the front as it moves from cell to cell, so its steps are at most
