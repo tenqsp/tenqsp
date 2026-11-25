@@ -5,7 +5,8 @@
 
 The Jacobian's parts are computed in JAX (``CompiledModel.jacobian_pieces``: the same
 coloured passes as the scipy backend), then assembled and factorised on the host
-(``CompiledModel.assemble_sparse``, ``scipy.sparse.linalg.splu``), exactly as scipy's BDF
+(``CompiledModel.assemble_sparse``, ``scipy.sparse.linalg.splu`` with the model's ordering method,
+``tenqsp._sparse_lu``), exactly as scipy's BDF
 does with the scipy backend's Jacobian: the same matrix, the same factorisation, so the two
 backends take the same steps (V9).
 
@@ -50,9 +51,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.sparse as sps
-from scipy.sparse.linalg import splu
 
 from tenqsp import _threads
+from tenqsp._sparse_lu import ordering
 from tenqsp._threads import limited
 from tenqsp.backends.jax_bdf import LinearSolver, when
 
@@ -235,6 +236,7 @@ class _Assembled:
 
     def __init__(self, cm, ledger: bool):
         self.cm, self.ledger = cm, ledger
+        self.order = ordering(cm)  # the LU's ordering method, chosen once (_sparse_lu)
         self._J: dict = {}
         self._nnz = 0
         self._lock = threading.Lock()
@@ -276,11 +278,11 @@ class _Failed:
         return np.full(np.shape(b), np.nan)
 
 
-def _splu(M):
+def _splu(M, order):
     if not np.all(np.isfinite(M.data)):
         return _Failed()
     try:
-        return splu(M)
+        return order.factor(M)
     except RuntimeError:  # "Factor is exactly singular"
         return _Failed()
 
@@ -298,7 +300,7 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
     @limited
     def factor_host(c, *pieces):
         # key 0: an unbatched run's ``refactor`` reuses this Jacobian
-        return np.int64(REGISTRY.add(_splu(assembled.matrix(0, pieces, c))))
+        return np.int64(REGISTRY.add(_splu(assembled.matrix(0, pieces, c), assembled.order)))
 
     @limited
     def refactor_host(need, F, c, *pieces):
@@ -309,7 +311,7 @@ def linear_solver(cm, *, ledger: bool) -> LinearSolver:
         flat = [np.asarray(p).reshape(size, *np.shape(p)[len(lead) :]) for p in pieces]
         need, F, c = need.reshape(size), F.reshape(size).copy(), c.reshape(size)
         for i in np.flatnonzero(need):
-            lu = _splu(assembled.matrix(int(i), [p[i] for p in flat], c[i]))
+            lu = _splu(assembled.matrix(int(i), [p[i] for p in flat], c[i]), assembled.order)
             REGISTRY.drop(int(F[i]))  # replaced: nothing holds it any more
             F[i] = REGISTRY.add(lu)
         return F.reshape(lead)
@@ -404,7 +406,7 @@ def solve_step(cm, pieces, c, b, matvec):
         b = np.broadcast_to(b, (*lead, n))
         if all(int(np.prod(sh)) == 1 for sh in leads):  # one matrix for every right-hand side
             one = [p.reshape(p.shape[p.ndim - k :]) for p, k in zip(pieces, base_ndim, strict=True)]
-            lu = _splu(assembled.matrix(None, one, c.reshape(())))
+            lu = _splu(assembled.matrix(None, one, c.reshape(())), assembled.order)
             return lu.solve(b.reshape(-1, n).T, trans=trans).T.reshape(b.shape)
         out = np.empty(b.shape)
         for idx in np.ndindex(*lead):  # a batch of matrices (vmap over parameters)
@@ -414,7 +416,8 @@ def solve_step(cm, pieces, c, b, matvec):
                 return a[idx]
 
             p_i = [at(p, k) for p, k in zip(pieces, base_ndim, strict=True)]
-            out[idx] = _splu(assembled.matrix(idx, p_i, at(c, 0))).solve(b[idx], trans=trans)
+            lu = _splu(assembled.matrix(idx, p_i, at(c, 0)), assembled.order)
+            out[idx] = lu.solve(b[idx], trans=trans)
         return out
 
     base_ndim = [np.ndim(p) for p in pieces]
