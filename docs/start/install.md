@@ -72,6 +72,13 @@ pip install -U "jax[cuda12]"
 Without a GPU, JAX prints a one-line note that it falls back to the CPU; that note needs no
 action.
 
+JAX's packages need a processor with the AVX2 instructions: every Intel processor since 2013
+(Haswell) and AMD since about 2015, but not some budget Pentium, Celeron and Atom models sold
+after that. On a processor without them, `import tenqsp` stops with "This version of jaxlib
+was built using AVX2 instructions, which your CPU and/or operating system do not support".
+No setting avoids it (TenQSP imports JAX whatever solver runs); use another computer, for
+example a workstation through a remote session, or a cloud notebook such as Google Colab.
+
 ## Known issues and updates
 
 Problems found in released versions are listed with TenQSP, together with the version that

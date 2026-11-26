@@ -248,6 +248,7 @@ def test_solves_above_the_old_dense_limit():
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(600)  # about 115 s alone: over the default 120 s on a loaded machine
 def test_toy_phage_model_above_the_old_dense_limit():
     """The phage toy at 60 x 100 (6,121 states) against a tight-tolerance solve."""
     m = toy_phage_model(60, 100)

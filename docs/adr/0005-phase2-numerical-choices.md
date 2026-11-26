@@ -34,6 +34,10 @@ records the later steps.
    half-cell balance: upwind flow (outside level in, edge value out) plus `h (c_out − u_edge)`.
    *Evidence:* exact steady solutions at either end converge at order 1.9–2.1 (sharp) and 0.9
    (erlang); the model-level MMS matrix (V15) passes on uniform and stretched grids.
+   *Amended in 0.9.2:* flow leaving faster than `g` (a cell Péclet number above 2) made the
+   outflow `v_out c_f` exceed what an empty edge cell holds, a negative field. The outflow is
+   now `v_out u_edge + min(v_out, g)(c_f − u_edge)`: unchanged up to a Péclet number of 2,
+   upwind for the excess beyond it.
 2. **End-cell slope of the sharp scheme where the edge value is unknown.** ADR 0004 took
    `J/v` as the edge value at every inflow end. With diffusion along the axis (Danckwerts
    inlet) the edge value is not `J/v` (the profile jumps below the feed level), and using it

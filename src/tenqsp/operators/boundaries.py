@@ -86,7 +86,14 @@ def robin_flux(
         flux into domain = v_in * outside - v_out * c_f + h * (outside - c_f)
 
     with ``v_in``, ``v_out`` the inward and outward parts of the velocity. With ``v = 0`` this
-    is the series resistance above. (Without diffusion there is no half-cell balance; the
+    is the series resistance above. Flow leaving at more than ``g`` (a cell Péclet number
+    ``v_out * width_edge / D_edge`` above 2) would make that outflow exceed what an empty edge
+    cell holds, so the part above ``g`` carries the edge cell's own value (upwind):
+
+        outflow = v_out * u_edge + min(v_out, g) * (c_f - u_edge)
+
+    which is ``v_out * c_f`` (second order) up to a Péclet number of 2, and keeps the field
+    nonnegative beyond it. (Without diffusion there is no half-cell balance; the
     caller adds the upwind advective flux, see ``upwind_end_flux``.)
     """
     ue = _edge(u, dim, side)
@@ -100,7 +107,8 @@ def robin_flux(
         ok = den > 0
         safe = jnp.where(ok, den, 1.0)  # all three zero: a closed end, c_f = u_edge
         cf = jnp.where(ok, ((v_in + h) * outside + g * ue) / safe, ue)
-        into_domain = v_in * outside - v_out * cf + h * (outside - cf)
+        outflow = jnp.where(v_out <= g, v_out * cf, v_out * ue + g * (cf - ue))
+        into_domain = v_in * outside - outflow + h * (outside - cf)
         return into_domain if side == "lower" else -into_domain
     if D_edge is None:
         into_domain = h * (outside - ue)

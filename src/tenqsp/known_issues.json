@@ -3,6 +3,36 @@
   "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
   "issues": [
     {
+      "id": "sharp-nonuniform-negative",
+      "title": "The sharp scheme could make a field negative on a nonuniform grid",
+      "area": ["model", "geometry"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.9.2",
+      "changes_results": true,
+      "details": "With `using sharp` on a grid whose cells are not all the same width, a cell wider than its neighbour could get a face value below the neighbour's and, next to an empty cell, a negative one, so transport took mass from the empty cell. Uniform grids were not affected.",
+      "workaround": "Use a uniform grid, or the erlang scheme."
+    },
+    {
+      "id": "sharp-one-sided-end-negative",
+      "title": "The sharp scheme could take mass from an empty end cell at a Robin end or an inflow with diffusion",
+      "area": ["model"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.9.2",
+      "changes_results": true,
+      "details": "At an end whose slope comes from the two nearest interior gradients (a Robin end, or an inflow or flux end with diffusion on the axis), an empty end cell below a rising field sent mass downstream and went negative. The change is confined to times when the end cell is nearly empty.",
+      "workaround": "Use the erlang scheme on that axis."
+    },
+    {
+      "id": "robin-outflow-negative",
+      "title": "A Robin end with flow leaving through it could make the edge cell negative",
+      "area": ["model"],
+      "introduced": "0.6.0",
+      "fixed_in": "0.9.2",
+      "changes_results": true,
+      "details": "With flow and diffusion at a Robin end and the flow leaving, the outflow carried the boundary value, which exceeded what an empty edge cell holds once the cell Péclet number |v| x width / D was above 2. At 2 or less nothing changes.",
+      "workaround": "Refine the grid so that the cell Péclet number at that end is 2 or less."
+    },
+    {
       "id": "native-zero-division-error",
       "title": "The native backend stopped with ZeroDivisionError where JAX gives inf or NaN",
       "area": ["solver"],
