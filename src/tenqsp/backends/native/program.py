@@ -162,7 +162,9 @@ def _write(cm, p: int, path: Path, data: Path) -> None:
         + "".join(f"{k} = _DATA[{k!r}]\n" for k in sorted(consts))
     )
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(head + "\n\n" + "\n\n\n".join(parts) + "\n\n\n" + _TEMPLATE.read_text())
+    # UTF-8 as Python reads source: the cache path in the file may hold any character
+    text = head + "\n\n" + "\n\n\n".join(parts) + "\n\n\n" + _TEMPLATE.read_text("utf-8")
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
 
 

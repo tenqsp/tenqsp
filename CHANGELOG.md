@@ -6,9 +6,10 @@ versioning; `0.x` releases may change the API.
 ## [Unreleased]
 
 ## [0.9.2] — 2026-11-27
-A bug-fix release: three cases where transport could make a field negative, and much faster
-sparse solves for models with an inflow that depends on an integral of a field. Results change
-only in the cases named under Fixed.
+A bug-fix release: three cases where transport could make a field negative, the native
+backend on Windows with a cache path outside the code page, and much faster sparse solves for
+models with an inflow that depends on an integral of a field. Results change only in the
+transport cases named under Fixed.
 
 ### Changed
 - **Much faster sparse solves where an inflow depends on an integral of a field** (a renewal
@@ -26,8 +27,9 @@ only in the cases named under Fixed.
   without numba says to `pip install "tenqsp[native]"`.
 
 ### Fixed
-Three places where transport could take mass from an empty cell and so make a field negative.
-Results change only in the cases named; everywhere else they are the same to the last digit.
+The first three entries are places where transport could take mass from an empty cell and so
+make a field negative. Results change only in the cases named; everywhere else they are the
+same to the last digit.
 - **`sharp` on a nonuniform grid**: a cell wider than its neighbour could get a face value
   below the neighbour's and, next to an empty cell, a negative one. The slope is now capped
   so that face values stay between the neighbouring averages (on a uniform grid the van Leer
@@ -39,6 +41,10 @@ Results change only in the cases named; everywhere else they are the same to the
   than an empty edge cell holds once the flow outruns diffusion across the half cell (a cell
   Péclet number |v| × width / D above 2). Above that, the part of the outflow beyond what
   diffusion carries takes the edge cell's own value; at 2 or less nothing changes.
+- **The native backend failed on Windows when the cache path held characters outside the
+  system's code page** (for example a Korean user name): the solver module it writes was
+  saved in that code page, not in UTF-8 as Python reads source, and the fit stopped with an
+  error. It is now written in UTF-8. No results change.
 
 ## [0.9.1] — 2026-11-22
 A bug-fix release for the native backend; no results change.

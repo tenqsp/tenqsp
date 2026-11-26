@@ -78,6 +78,21 @@ def test_values_without_derivatives():
                                rtol=1e-8)  # fmt: skip
 
 
+def test_a_cache_directory_with_any_characters(tmp_path, monkeypatch):
+    """The generated module is UTF-8, as Python reads source, whatever the system's
+    encoding: on Windows a user name outside the code page used to break the write."""
+    d = tmp_path / "사용자 é"
+    monkeypatch.setenv("TENQSP_NATIVE_CACHE", str(d))
+    sim = tq.Model.from_text(PK).simulator(outputs=["conc"], **TIGHT)
+    fj = sim.function(boluses(), wrt=["ka"], derivatives=False)
+    fn = sim.function(boluses(), wrt=["ka"], derivatives=False, backend="native")
+    X = jnp.asarray(fj.x0)
+    np.testing.assert_allclose(np.asarray(fn(X)["conc"]), np.asarray(fj(X)["conc"]),
+                               rtol=1e-8)  # fmt: skip
+    (module,) = d.glob("*.py")
+    assert str(d) in module.read_text("utf-8")
+
+
 def test_where_native_does_not_apply():
     sim = tq.Model.from_text(PK).simulator(outputs=["conc"])
     with pytest.raises(ValueError, match="reverse derivatives"):
