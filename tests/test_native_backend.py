@@ -94,7 +94,7 @@ def test_a_cache_directory_with_any_characters(tmp_path, monkeypatch):
     np.testing.assert_allclose(np.asarray(fn(X)["conc"]), np.asarray(fj(X)["conc"]),
                                rtol=1e-8)  # fmt: skip
     (module,) = d.glob("*.py")
-    assert str(d) in module.read_text("utf-8")
+    assert "사용자 é" in module.read_text("utf-8")  # the path, as a Python literal
 
 
 def test_where_native_does_not_apply():
