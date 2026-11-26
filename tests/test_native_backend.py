@@ -83,7 +83,11 @@ def test_a_cache_directory_with_any_characters(tmp_path, monkeypatch):
     encoding: on Windows a user name outside the code page used to break the write."""
     d = tmp_path / "사용자 é"
     monkeypatch.setenv("TENQSP_NATIVE_CACHE", str(d))
-    sim = tq.Model.from_text(PK).simulator(outputs=["conc"], **TIGHT)
+    # a model of its own: one built earlier in this process would not be written again
+    text = PK.replace("model pk_native", "model pk_cache_path").replace(
+        "d_t(depot) = -ka*depot", "d_t(depot) = -ka*depot - 0.01*depot"
+    )
+    sim = tq.Model.from_text(text).simulator(outputs=["conc"], **TIGHT)
     fj = sim.function(boluses(), wrt=["ka"], derivatives=False)
     fn = sim.function(boluses(), wrt=["ka"], derivatives=False, backend="native")
     X = jnp.asarray(fj.x0)
