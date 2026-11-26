@@ -5,6 +5,11 @@ versioning; `0.x` releases may change the API.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-11-27
+A bug-fix release: three cases where transport could make a field negative, and much faster
+sparse solves for models with an inflow that depends on an integral of a field. Results change
+only in the cases named under Fixed.
+
 ### Changed
 - **Much faster sparse solves where an inflow depends on an integral of a field** (a renewal
   boundary such as `at z=0: v*u = b*Q` with `Q = int_z(u)`). Such a model has a full row in
