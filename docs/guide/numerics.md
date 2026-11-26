@@ -296,6 +296,11 @@ print(np.max(np.abs(a["conc"] - b["conc"])) / np.max(a["conc"]))
   linear systems with a dense LU inside JAX. Above, it calls SuperLU, the sparse LU scipy uses
   (the "sparse tier"); a solve there takes 1.5 to 2.6 times as long as on scipy
   ([Performance](../background/performance.md)).
+- **The sparse LU's column ordering** (both solvers): SuperLU's default, COLAMD, unless MMD
+  on A^T + A fills in less than a fifth as much at the model's first factorization (the
+  choice is then kept). The case that needs MMD is an inflow that depends on an integral of
+  the field (a renewal boundary): COLAMD then fills in the whole matrix below the
+  integral's row.
 - **No Radau fallback.** A failing run raises `tq.SolverError` saying where it failed and
   suggesting `backend="scipy"`. The case where this matters is the one in
   [Tolerances](#tolerances): a large dose into a state near 0 with a very small `atol` (below

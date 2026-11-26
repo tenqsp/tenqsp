@@ -83,14 +83,15 @@ def _validate(ir: ModelIR, stacklevel: int = 4) -> None:
 
 def _lu_size(cm) -> float | None:
     """Megabytes of the sparse LU factors of I - hJ at the starting state (what BDF factors),
-    measured with SuperLU as the solver does (missing values set to 1); None if it fails."""
-    import scipy.sparse.linalg as spla
+    measured with SuperLU and the model's ordering method as the solver does (missing values set
+    to 1); None if it fails."""
+    from tenqsp._sparse_lu import ordering  # here: _sparse_lu is a leaf, compile is not
 
     try:
         th = cm._stand_in_theta()
         y = np.asarray(cm.initial_state(th))
         J = cm.sparse_jacobian(0.0, y, th)
-        lu = spla.splu((sps.identity(J.shape[0], format="csc") - 1e-3 * J).tocsc())
+        lu = ordering(cm).factor((sps.identity(J.shape[0], format="csc") - 1e-3 * J).tocsc())
     except Exception:  # noqa: BLE001 - a size estimate only
         return None
     return ((lu.L.nnz + lu.U.nnz) * 12 + 2 * (J.shape[0] + 1) * 4) / 1e6

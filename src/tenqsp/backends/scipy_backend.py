@@ -42,8 +42,10 @@ import warnings
 from collections.abc import Mapping, Sequence
 
 import numpy as np
+import scipy.sparse as sps
 from scipy.integrate import solve_ivp
 
+from tenqsp._sparse_lu import ordering
 from tenqsp._threads import limited
 from tenqsp.compile import CompiledModel
 from tenqsp.ledger import build_ledger
@@ -406,6 +408,7 @@ def solve(
     n_events = 0
     switched = None  # (time, condition) of the last state-dependent switch
     start = time.perf_counter()
+    order = ordering(cm)  # the LU's ordering method, chosen at the first factorization
     for a, b in zip(bounds[:-1], bounds[1:], strict=True):
         if slot is not None:
             th[slot] = 0.5 * (a + b)  # conditions on time are constant on (a, b)
@@ -422,7 +425,7 @@ def solve(
             watch = _group_events(cm, group_w, armed, n) + _switch_events(cm, direction, th, n)
             res = _attempt(
                 fun, jacobian, a, b, y, t_eval, method, rtol, atol, max_step, stats, watch,
-                max_steps, (rtol_given, atol_states),
+                max_steps, (rtol_given, atol_states), order,
             )  # fmt: skip
             if not res.success and method == "BDF":
                 messages.append(
@@ -431,7 +434,7 @@ def solve(
                 )
                 res = _attempt(
                     fun, jacobian, a, b, y, t_eval, "Radau", rtol, atol, max_step, stats,
-                    watch, max_steps, (rtol_given, atol_states),
+                    watch, max_steps, (rtol_given, atol_states), order,
                 )  # fmt: skip
             if not res.success:
                 reached = f" (reached t = {res.t[-1]:g})" if len(res.t) else ""
@@ -638,13 +641,26 @@ class _TooManySteps(Exception):
         self.t, self.h = t, h
 
 
-def _counted(method: str, limit: int):
-    """scipy's integrator class for ``method``, stopping after ``limit`` steps."""
+def _counted(method: str, limit: int, order=None):
+    """scipy's integrator class for ``method``, stopping after ``limit`` steps. With
+    ``order`` (the model's ``_sparse_lu.Ordering``) a sparse iteration matrix is factored
+    with the model's ordering method instead of scipy's ``splu(A)``, which always uses
+    COLAMD."""
     from scipy.integrate import BDF, Radau
 
     base = {"BDF": BDF, "Radau": Radau}[method]
 
     class Counted(base):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if order is not None and sps.issparse(self.J):
+
+                def lu(A):
+                    self.nlu += 1
+                    return order.factor(A)
+
+                self.lu = lu  # scipy calls self.lu(A), then self.solve_lu(LU, b) = LU.solve(b)
+
         def _step_impl(self):
             self._tq_steps = getattr(self, "_tq_steps", 0) + 1
             if self._tq_steps > limit:
@@ -656,14 +672,16 @@ def _counted(method: str, limit: int):
 
 def _attempt(
     fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, stats, events=(),
-    max_steps=100_000, given=None,
+    max_steps=100_000, given=None, order=None,
 ):  # fmt: skip
     """One try at a segment. An error raised inside the integrator (e.g. a singular or
     non-finite matrix) counts as a failure, so it can be retried; the work done is counted
     either way. More than ``max_steps`` steps raises ``SolverError`` at once (another
     method would crawl as well)."""
     try:
-        res = _segment(fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, events, max_steps)
+        res = _segment(
+            fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, events, max_steps, order
+        )
     except _TooManySteps as stop:
         rtol_given, atol_states = given if given is not None else (rtol, atol)
         raise SolverError(
@@ -714,7 +732,10 @@ def first_step(fun, a, b, y, method, rtol, atol, max_step) -> float:
     return float(min(max(h, FIRST_STEP_FLOOR * span), span, max_step))
 
 
-def _segment(fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, events=(), max_steps=100_000):
+def _segment(
+    fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, events=(), max_steps=100_000,
+    order=None,
+):  # fmt: skip
     with warnings.catch_warnings():
         # scipy's BDF allocates its difference table with np.empty and, on the first step,
         # subtracts a row it has not yet written (bdf.py, "D[order + 2] = d - D[order + 1]").
@@ -731,7 +752,7 @@ def _segment(fun, jac, a, b, y, t_eval, method, rtol, atol, max_step, events=(),
             fun,
             (a, b),
             y,
-            method=_counted(method, max_steps),
+            method=_counted(method, max_steps, order),
             t_eval=t_eval,
             jac=jac,
             rtol=rtol,
