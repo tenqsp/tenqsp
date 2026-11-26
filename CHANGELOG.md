@@ -12,8 +12,8 @@ versioning; `0.x` releases may change the API.
   it. On a 1,000-cell example the factors had 502,502 nonzeros instead of 4,500, and the run
   took 62 s instead of 8 s. At its first factorization each model now compares COLAMD with
   MMD on A^T + A and keeps MMD only if it fills in less than a fifth as much; elsewhere
-  COLAMD stays, and a run repeats to the last digit. This applies to the scipy backend and to the JAX backend's sparse tier. The
-  LU size in `summary()` uses the same choice. Results agree to rounding; the reference
+  COLAMD stays, and a run repeats to the last digit. This applies to the scipy backend and
+  to the JAX backend's sparse tier. The LU size in `summary()` uses the same choice. Results agree to rounding; the reference
   models run as before.
 - **Fewer packages installed**: diffrax, lineax and equinox are no longer requirements;
   TenQSP's own solvers replaced them and nothing imports them any more.
