@@ -73,8 +73,8 @@ def test_results_do_not_depend_on_the_method(monkeypatch):
 
 @pytest.mark.parametrize("n", [40, 400])
 def test_a_model_without_the_full_row_keeps_colamd(n):
-    """Transport alone: no integral, no full row; COLAMD stays, and a second run repeats the
-    first to the last digit."""
+    """Transport alone: no integral, no full row; the alternative is never chosen, and a second
+    run repeats the first to the last digit."""
     m = tq.Model.from_text(
         f"""
 model decay
@@ -91,4 +91,5 @@ u(0) = 1
     again = np.asarray(m.solve((0, 1), times=[1])["u"])
     np.testing.assert_array_equal(first, again)
     cm = m.compile()
-    assert set(_sparse_lu.ordering(cm)._spec.values()) == {_sparse_lu.DEFAULT}
+    # empty when no sparse matrix was factored (a small model on the JAX backend's dense tier)
+    assert set(_sparse_lu.ordering(cm)._spec.values()) <= {_sparse_lu.DEFAULT}
