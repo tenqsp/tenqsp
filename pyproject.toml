@@ -65,6 +65,14 @@ timeout = 120
 # directly can see the warning when that memory happens to hold a NaN pattern
 filterwarnings = [
     "ignore:invalid value encountered in subtract:RuntimeWarning:scipy.integrate._ivp.bdf",
+    # a text file opened without encoding= reads or writes in the system's code page, not
+    # UTF-8 (on Windows, a Korean one breaks a non-ASCII file); CI sets
+    # PYTHONWARNDEFAULTENCODING=1 so that this fails on every system. Other packages' own
+    # reads are theirs to fix.
+    "error::EncodingWarning",
+    "ignore::EncodingWarning:jax",
+    "ignore::EncodingWarning:matplotlib",
+    "ignore::EncodingWarning:threadpoolctl",
 ]
 markers = [
     "slow: convergence studies and long runs (run in CI with -m slow)",

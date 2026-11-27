@@ -95,7 +95,7 @@ for transport without spread, its standard deviation should go to 0 as the grid 
 ```python
 from pathlib import Path
 
-Path("transit.tq").write_text(m.to_text())
+Path("transit.tq").write_text(m.to_text(), encoding="utf-8")
 t = np.linspace(0, 4, 401)
 
 
@@ -145,7 +145,7 @@ print(erlang.explain().split("Boundaries")[0])
 ```
 
 ```python
-Path("transit_erlang.tq").write_text(erlang.to_text())
+Path("transit_erlang.tq").write_text(erlang.to_text(), encoding="utf-8")
 mean, sd = transit_times(tq.load("transit_erlang.tq", cells={"z": 40}))
 print(f"erlang, 40 cells: mean {mean:.3f}, sd {sd:.3f}, CV {sd / mean:.3f}")
 ```
