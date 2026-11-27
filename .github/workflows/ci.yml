@@ -34,6 +34,9 @@ jobs:
     env:
       FULL: ${{ github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       RELEASE: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
+      # a text file opened without encoding= warns, and the tests turn that into a failure
+      # (pyproject.toml): Linux and macOS read UTF-8 anyway and would not show it otherwise
+      PYTHONWARNDEFAULTENCODING: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

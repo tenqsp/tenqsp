@@ -8,6 +8,8 @@ that build more models are marked slow."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -148,8 +150,7 @@ def test_a_model_with_an_axis():
     the kernels as loops over flat buffers (the mode of large models)."""
     from tenqsp.backends.native import translate
 
-    text = open(__file__.replace("test_native_backend.py",
-                                 "notation_models/friberg.tq")).read()  # fmt: skip
+    text = (Path(__file__).parent / "notation_models" / "friberg.tq").read_text("utf-8")
     m = tq.Model.from_text(text)
     sim = m.simulator(outputs=["Circ"], **TIGHT)
     scs = [tq.Scenario(params={"slope": s_}, times=tuple(np.linspace(10, 300, 8)))

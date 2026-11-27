@@ -540,12 +540,12 @@ file, which is easier to read and to compare between versions:
 ```python
 from pathlib import Path
 
-Path("tissue.tq").write_text(tissue.to_text())
+Path("tissue.tq").write_text(tissue.to_text(), encoding="utf-8")
 m1 = tq.load("tissue.tq")                          # the same model
 m2 = tq.load("tissue.tq", cells={"x": 40})         # the same model on a finer grid
 
-Path("tissue.json").write_text(tissue.to_ir().to_json())
-m3 = tq.Model.from_ir(tq.ModelIR.from_json(Path("tissue.json").read_text()))
+Path("tissue.json").write_text(tissue.to_ir().to_json(), encoding="utf-8")
+m3 = tq.Model.from_ir(tq.ModelIR.from_json(Path("tissue.json").read_text(encoding="utf-8")))
 
 print(differences(tissue.to_ir(), m1.to_ir()), differences(tissue.to_ir(), m3.to_ir()))
 print(m2.summary())

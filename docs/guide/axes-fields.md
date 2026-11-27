@@ -445,7 +445,7 @@ A model written in notation can live in a plain text file with the extension `.t
 - `params={...}` replaces default values (a table from `tq.table` included).
 
 ```python
-with open("maturation.tq", "w") as f:
+with open("maturation.tq", "w", encoding="utf-8") as f:
     f.write("""
 model maturation
 axis a in [0, 10] n=20 units=d kind=one_way
