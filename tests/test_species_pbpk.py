@@ -17,7 +17,7 @@ from test_sparse_jacobian import _random_point
 
 import tenqsp as tq
 
-ONE = (Path(__file__).parent / "notation_models" / "pbpk.tq").read_text()
+ONE = (Path(__file__).parent / "notation_models" / "pbpk.tq").read_text("utf-8")
 TIGHT = {"rtol": 1e-10, "atol": 1e-12}
 TIMES = [0.5, 4.0, 24.0]
 DRUGS = {"d1": {"R": 10.0, "CLint": 30.0}, "d2": {"R": 3.0, "CLint": 5.0}}

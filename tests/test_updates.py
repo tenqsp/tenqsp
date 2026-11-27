@@ -94,7 +94,7 @@ def fake_fetch(latest, issues, changelog=CHANGELOG, calls=None):
 
 
 def test_the_shipped_list_is_well_formed():
-    data = json.loads((ROOT / "src/tenqsp/known_issues.json").read_text())
+    data = json.loads((ROOT / "src/tenqsp/known_issues.json").read_text("utf-8"))
     assert data["schema"] == 1 and data["issues"]
     ids = [i["id"] for i in data["issues"]]
     assert len(ids) == len(set(ids))
@@ -234,7 +234,7 @@ def test_the_newest_list_unreadable_falls_back_to_the_installed_one(monkeypatch)
 
 
 def test_the_changelog_of_this_repository_parses():
-    text = (ROOT / "CHANGELOG.md").read_text()
+    text = (ROOT / "CHANGELOG.md").read_text("utf-8")
     feats = updates._features(text, "0.6.0", "0.8.0")
     assert feats and all(len(f) < 110 for f in feats)
     assert any(f.endswith("(0.8.0)") for f in feats) and any(f.endswith("(0.6.1)") for f in feats)

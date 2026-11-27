@@ -3,6 +3,16 @@
   "about": "Problems found in released versions of TenQSP. Each entry gives the first version affected (introduced), the version that fixed it (fixed_in, null while open), whether it could change results without an error (changes_results), and the areas it touches. Read by tq.known_issues() and tq.check_updates().",
   "issues": [
     {
+      "id": "native-cache-path-encoding",
+      "title": "The native backend failed on Windows with a cache path outside the system's code page",
+      "area": ["solver"],
+      "introduced": "0.9.0",
+      "fixed_in": "0.9.2",
+      "changes_results": false,
+      "details": "The module the native backend writes to its cache directory (~/.cache/tenqsp/native or TENQSP_NATIVE_CACHE) was saved in the system's encoding, not UTF-8. On Windows a path with characters outside the code page, such as a Korean user name, made the write or the import fail with an error.",
+      "workaround": "Set TENQSP_NATIVE_CACHE to a directory whose path has only ASCII characters."
+    },
+    {
       "id": "sharp-nonuniform-negative",
       "title": "The sharp scheme could make a field negative on a nonuniform grid",
       "area": ["model", "geometry"],
